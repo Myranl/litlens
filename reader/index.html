@@ -1,6 +1,17 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
+<script>
+(function () {
+  var pref = localStorage.getItem("litlens-theme") || "auto";
+  var theme = pref;
+  if (pref === "auto") {
+    var h = new Date().getHours();
+    theme = h >= 7 && h < 20 ? "light" : "dark";
+  }
+  document.documentElement.setAttribute("data-theme", theme);
+})();
+</script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>LitLens — Literature Review</title>
@@ -57,12 +68,15 @@
 
   <aside id="right-panel">
     <div class="panel-tabs">
-      <button class="panel-tab active" data-tab="terms">Terms</button>
-      <button class="panel-tab" data-tab="meta">Info</button>
-      <button class="panel-tab" data-tab="tags">Tags</button>
-      <button class="panel-tab" data-tab="notes">Notes</button>
-      <button class="panel-tab" data-tab="marks">Marks</button>
-      <button class="panel-tab" data-tab="search">Search</button>
+      <div class="panel-tabs-main">
+        <button class="panel-tab active" data-tab="terms">Terms</button>
+        <button class="panel-tab" data-tab="meta">Info</button>
+        <button class="panel-tab" data-tab="tags">Tags</button>
+        <button class="panel-tab" data-tab="notes">Notes</button>
+        <button class="panel-tab" data-tab="marks">Marks</button>
+        <button class="panel-tab" data-tab="search">Search</button>
+      </div>
+      <button type="button" class="panel-tab panel-tab-icon" data-tab="settings" title="Settings — link categories to Info fields" aria-label="Settings">&#9881;</button>
     </div>
     <div class="panel-content active" id="tab-terms">
       <div id="terms-panel"></div>
@@ -108,12 +122,22 @@
           <button type="button" class="meta-fill-btn" data-fill="url" title="Fill from selection">+</button>
         </div>
       </div>
-      <hr style="border:none;border-top:1px solid var(--color-divider);margin:14px 0">
-      <p class="notes-label" style="margin-bottom:8px">Study metadata (multi-select)</p>
       <div class="meta-field">
         <label class="form-label" for="meta-n-animals">N animals</label>
-        <input class="form-input" id="meta-n-animals" type="text" inputmode="numeric" placeholder="e.g. 12" style="margin-bottom:0">
+        <div class="meta-field-row">
+          <input class="form-input" id="meta-n-animals" type="text" inputmode="numeric" placeholder="e.g. 12" autocomplete="off">
+          <button type="button" class="meta-fill-btn" data-fill="nAnimals" title="Fill from selection">+</button>
+        </div>
       </div>
+      <div class="meta-field">
+        <label class="form-label" for="meta-cell-filter">Cell filter criterion</label>
+        <div class="meta-field-row" style="align-items:flex-start">
+          <textarea class="meta-textarea" id="meta-cell-filter" placeholder="Inclusion criteria for cells…" rows="4"></textarea>
+          <button type="button" class="meta-fill-btn" data-fill="cellFilterCriterion" title="Fill from selection" style="margin-top:2px">+</button>
+        </div>
+      </div>
+      <hr style="border:none;border-top:1px solid var(--color-divider);margin:14px 0">
+      <p class="notes-label" style="margin-bottom:8px">Study metadata</p>
       <div id="meta-structured-fields"></div>
       <button type="button" class="btn-sm btn-primary" id="export-meta-csv-btn" style="width:100%;margin-top:14px">Export all as CSV</button>
     </div>
@@ -132,16 +156,22 @@
     </div>
 
     <div class="panel-content" id="tab-marks">
-      <p class="meta-hint" style="margin-top:0">Place the cursor in the article (or select text), then add a bookmark. Click a bookmark to jump there.</p>
+      <p class="meta-hint" style="margin-top:0">Sections like Abstract and Methods are detected from h1–h6 headings when you open an article or click Detect sections. You can also add bookmarks manually: Click a bookmark to jump there.</p>
       <div class="bookmarks-actions">
         <button type="button" class="btn-sm btn-primary" id="add-methods-bookmark-btn">+ Methods</button>
         <button type="button" class="btn-sm btn-ghost" id="add-bookmark-btn">+ Bookmark</button>
+        <button type="button" class="btn-sm btn-ghost" id="detect-sections-btn" title="Find Abstract, Methods, Results… from h1–h6 headings">Detect sections</button>
       </div>
       <p class="bookmarks-empty" id="bookmarks-empty"></p>
       <div class="bookmarks-list" id="bookmarks-list"></div>
     </div>
     <div class="panel-content" id="tab-notes">
       <textarea class="notes-area" id="notes-area" placeholder="Notes for the current article…"></textarea>
+    </div>
+
+    <div class="panel-content" id="tab-settings">
+      <p class="notes-label">Highlight rules</p>
+      <div id="settings-column-links"></div>
     </div>
     <div class="panel-content" id="tab-search">
       <div class="kw-add-input">
@@ -188,10 +218,14 @@
 </div>
 
 <script src="/shared/highlight.js"></script>
+<script src="/shared/column-links.js"></script>
 <script src="/shared/bookmarks.js"></script>
+<script src="/shared/article-extract.js"></script>
+<script src="/shared/section-detect.js"></script>
 <script src="/shared/metadata.js"></script>
 <script src="app.js"></script>
 <script src="structured-meta.js"></script>
 <script src="bookmarks-ui.js"></script>
+<script src="settings-ui.js"></script>
 </body>
 </html>

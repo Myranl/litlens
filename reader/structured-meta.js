@@ -1,4 +1,4 @@
-/** Multi-select study metadata (Info tab) + vocab suggestions. */
+/** Multi-select study metadata (Info tab) — Notion-style comboboxes. */
 (function () {
   const API = `${location.origin}/api`;
 
@@ -13,6 +13,7 @@
 
   let vocab = {};
   let structured = emptyStructured();
+  let openDropdown = null;
 
   function emptyStructured() {
     return {
@@ -81,57 +82,26 @@
     }
   }
 
-  function setFromArticle(article) {
-    if (!article) {
-      structured = emptyStructured();
-      const nEl = $("meta-n-animals");
-      if (nEl) nEl.value = "";
-      renderAll();
-      return;
-    }
-    const s = article.structured || {};
-    structured = {
-      species: [...(s.species || [])],
-      brainRegions: (s.brainRegions || []).map(normalizeBrainRegion),
-      behavioralParadigms: [...(s.behavioralParadigms || [])],
-      recordingMethods: [...(s.recordingMethods || [])],
-      cellTypes: [...(s.cellTypes || [])],
-      methods: [...(s.methods || [])],
-    };
-    const nEl = $("meta-n-animals");
-    if (nEl) nEl.value = article.nAnimals || s.nAnimals || "";
-    renderAll();
+  function closeDropdown(dd) {
+    if (dd) dd.classList.remove("open");
+    if (openDropdown === dd) openDropdown = null;
   }
 
-  function readPayload() {
-    const nAnimals = ($("meta-n-animals")?.value || "").trim();
-    return {
-      nAnimals,
-      structured: {
-        ...structured,
-        nAnimals,
-      },
-    };
+  function openDropdownEl(dd) {
+    if (openDropdown && openDropdown !== dd) closeDropdown(openDropdown);
+    dd.classList.add("open");
+    openDropdown = dd;
   }
 
-  function renderChips(container, items, onRemove) {
-    container.replaceChildren();
-    for (let i = 0; i < items.length; i++) {
-      const chip = document.createElement("span");
-      chip.className = "meta-chip";
-      const label = document.createElement("span");
-      label.textContent = typeof items[i] === "string" ? items[i] : items[i].__label;
-      const x = document.createElement("span");
-      x.className = "meta-chip-x";
-      x.textContent = "×";
-      x.title = "Remove";
-      x.addEventListener("click", () => onRemove(i));
-      chip.append(label, x);
-      container.appendChild(chip);
-    }
-  }
+  /** Close when clicking outside the whole combobox (wrap), not only the dropdown node. */
+  document.addEventListener("mousedown", (e) => {
+    if (!openDropdown) return;
+    const wrap = openDropdown.parentElement;
+    if (wrap?.contains(e.target)) return;
+    closeDropdown(openDropdown);
+  });
 
-  function renderListField(field) {
+  function createNotionMultiSelect(field) {
     const section = document.createElement("div");
     section.className = "meta-section";
     section.dataset.field = field.key;
@@ -140,66 +110,163 @@
     label.className = "meta-section-label";
     label.textContent = field.label;
 
-    const chips = document.createElement("div");
-    chips.className = "meta-chips";
+    const wrap = document.createElement("div");
+    wrap.className = "notion-select";
 
-    const items = structured[field.key];
-    renderChips(
-      chips,
-      items.map((v) => ({ __label: v })),
-      (idx) => {
-        structured[field.key].splice(idx, 1);
-        renderAll();
-        scheduleSave();
-      }
-    );
-
-    const row = document.createElement("div");
-    row.className = "meta-add-row";
+    const inner = document.createElement("div");
+    inner.className = "notion-select-inner";
 
     const input = document.createElement("input");
-    input.className = "kw-input";
-    input.placeholder = "Type or pick…";
-    input.setAttribute("list", `vocab-${field.key}`);
+    input.type = "text";
+    input.className = "notion-select-input";
+    input.placeholder = "Select or type…";
+    input.autocomplete = "off";
 
-    const datalist = document.createElement("datalist");
-    datalist.id = `vocab-${field.key}`;
-    for (const opt of vocab[field.vocabKey] || []) {
-      const o = document.createElement("option");
-      o.value = opt;
-      datalist.appendChild(o);
+    const dropdown = document.createElement("div");
+    dropdown.className = "notion-select-dropdown";
+
+    const hint = document.createElement("div");
+    hint.className = "notion-select-hint";
+    hint.textContent = "Select an option or create one";
+    dropdown.appendChild(hint);
+
+    const list = document.createElement("div");
+    list.className = "notion-select-list";
+    dropdown.appendChild(list);
+
+    function renderChips() {
+      inner.querySelectorAll(".notion-chip").forEach((c) => c.remove());
+      const values = structured[field.key];
+      values.forEach((val, idx) => {
+        const chip = document.createElement("span");
+        chip.className = "notion-chip";
+        chip.appendChild(document.createTextNode(val));
+        const x = document.createElement("button");
+        x.type = "button";
+        x.className = "notion-chip-x";
+        x.textContent = "×";
+        x.addEventListener("click", (e) => {
+          e.stopPropagation();
+          structured[field.key].splice(idx, 1);
+          renderChips();
+          scheduleSave();
+        });
+        chip.appendChild(x);
+        inner.insertBefore(chip, input);
+      });
     }
 
-    const addBtn = document.createElement("button");
-    addBtn.type = "button";
-    addBtn.className = "kw-add-btn";
-    addBtn.textContent = "+";
-    addBtn.title = "Add";
+    function filteredOptions(query) {
+      const q = query.trim().toLowerCase();
+      const opts = vocab[field.vocabKey] || [];
+      const selected = new Set(structured[field.key]);
+      return opts.filter((o) => {
+        if (selected.has(o)) return false;
+        if (!q) return true;
+        return o.toLowerCase().includes(q);
+      });
+    }
 
-    const addCurrent = async () => {
-      const v = input.value.trim();
-      if (!v) return;
-      if (!structured[field.key].includes(v)) {
-        structured[field.key].push(v);
-        scheduleSave();
+    function renderList() {
+      list.replaceChildren();
+      const q = input.value;
+      const options = filteredOptions(q);
+
+      for (const opt of options.slice(0, 40)) {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "notion-option";
+        const pill = document.createElement("span");
+        pill.className = "notion-option-pill";
+        pill.textContent = opt;
+        row.appendChild(pill);
+        row.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          void pickValue(opt);
+        });
+        list.appendChild(row);
       }
+
+      const exact = q.trim();
+      if (
+        exact &&
+        !structured[field.key].includes(exact) &&
+        !(vocab[field.vocabKey] || []).some(
+          (o) => o.toLowerCase() === exact.toLowerCase()
+        )
+      ) {
+        const create = document.createElement("button");
+        create.type = "button";
+        create.className = "notion-option notion-option-create";
+        create.textContent = `Create "${exact}"`;
+        create.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          void pickValue(exact);
+        });
+        list.appendChild(create);
+      }
+
+      if (!list.childElementCount) {
+        const empty = document.createElement("div");
+        empty.className = "notion-select-empty";
+        empty.textContent = q.trim() ? "No matches" : "No options yet — type to create";
+        list.appendChild(empty);
+      }
+    }
+
+    async function pickValue(val) {
+      const v = val.trim();
+      if (!v || structured[field.key].includes(v)) return;
+      structured[field.key].push(v);
       if (!(vocab[field.vocabKey] || []).includes(v)) {
         await addVocabOption(field.vocabKey, v);
       }
       input.value = "";
-      renderAll();
-    };
+      renderChips();
+      renderList();
+      scheduleSave();
+      input.focus();
+    }
 
-    addBtn.addEventListener("click", () => void addCurrent());
+    inner.addEventListener("mousedown", (e) => {
+      e.stopPropagation();
+      if (document.activeElement !== input) input.focus();
+      openDropdownEl(dropdown);
+      renderList();
+    });
+
+    dropdown.addEventListener("mousedown", (e) => e.stopPropagation());
+
+    input.addEventListener("focus", () => {
+      openDropdownEl(dropdown);
+      renderList();
+    });
+
+    input.addEventListener("input", () => {
+      openDropdownEl(dropdown);
+      renderList();
+    });
+
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
-        void addCurrent();
+        const v = input.value.trim();
+        if (v) void pickValue(v);
+      } else if (e.key === "Backspace" && !input.value && structured[field.key].length) {
+        structured[field.key].pop();
+        renderChips();
+        scheduleSave();
+      } else if (e.key === "Escape") {
+        closeDropdown(dropdown);
+        input.blur();
       }
     });
 
-    row.append(input, datalist, addBtn);
-    section.append(label, chips, row);
+    inner.appendChild(input);
+    wrap.append(inner, dropdown);
+    section.append(label, wrap);
+
+    renderChips();
     return section;
   }
 
@@ -211,30 +278,27 @@
     label.className = "meta-section-label";
     label.textContent = field.label;
 
-    const chips = document.createElement("div");
-    chips.className = "meta-chips";
-    renderChips(
-      chips,
-      structured.brainRegions.map((r) => ({ __label: regionChipLabel(r) })),
-      (idx) => {
-        structured.brainRegions.splice(idx, 1);
-        renderAll();
-        scheduleSave();
-      }
-    );
+    const wrap = document.createElement("div");
+    wrap.className = "notion-select";
 
-    const regionInput = document.createElement("input");
-    regionInput.className = "kw-input";
-    regionInput.placeholder = "Region (e.g. CA1)";
-    regionInput.setAttribute("list", "vocab-brainRegions");
+    const inner = document.createElement("div");
+    inner.className = "notion-select-inner";
 
-    const datalist = document.createElement("datalist");
-    datalist.id = "vocab-brainRegions";
-    for (const opt of vocab.brainRegions || []) {
-      const o = document.createElement("option");
-      o.value = opt;
-      datalist.appendChild(o);
-    }
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "notion-select-input";
+    input.placeholder = "Region…";
+    input.autocomplete = "off";
+
+    const dropdown = document.createElement("div");
+    dropdown.className = "notion-select-dropdown";
+    const hint = document.createElement("div");
+    hint.className = "notion-select-hint";
+    hint.textContent = "Select a region or create one";
+    dropdown.append(hint);
+    const list = document.createElement("div");
+    list.className = "notion-select-list";
+    dropdown.appendChild(list);
 
     const coords = document.createElement("div");
     coords.className = "meta-coords";
@@ -249,16 +313,67 @@
     dv.title = "Dorsoventral (mm)";
     coords.append(ap, ml, dv);
 
-    const row = document.createElement("div");
-    row.className = "meta-add-row";
+    function renderChips() {
+      inner.querySelectorAll(".notion-chip").forEach((c) => c.remove());
+      structured.brainRegions.forEach((r, idx) => {
+        const chip = document.createElement("span");
+        chip.className = "notion-chip";
+        chip.appendChild(document.createTextNode(regionChipLabel(r)));
+        const x = document.createElement("button");
+        x.type = "button";
+        x.className = "notion-chip-x";
+        x.textContent = "×";
+        x.addEventListener("click", (e) => {
+          e.stopPropagation();
+          structured.brainRegions.splice(idx, 1);
+          renderChips();
+          scheduleSave();
+        });
+        chip.appendChild(x);
+        inner.insertBefore(chip, input);
+      });
+    }
 
-    const addBtn = document.createElement("button");
-    addBtn.type = "button";
-    addBtn.className = "kw-add-btn";
-    addBtn.textContent = "+";
+    function renderList() {
+      list.replaceChildren();
+      const q = input.value.trim().toLowerCase();
+      const opts = (vocab.brainRegions || []).filter((o) =>
+        q ? o.toLowerCase().includes(q) : true
+      );
+      for (const opt of opts.slice(0, 40)) {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "notion-option";
+        const pill = document.createElement("span");
+        pill.className = "notion-option-pill";
+        pill.textContent = opt;
+        row.appendChild(pill);
+        row.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          input.value = opt;
+          void addRegion();
+        });
+        list.appendChild(row);
+      }
+      const exact = input.value.trim();
+      if (
+        exact &&
+        !opts.some((o) => o.toLowerCase() === exact.toLowerCase())
+      ) {
+        const create = document.createElement("button");
+        create.type = "button";
+        create.className = "notion-option notion-option-create";
+        create.textContent = `Create "${exact}"`;
+        create.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          void addRegion();
+        });
+        list.appendChild(create);
+      }
+    }
 
-    const addRegion = async () => {
-      const labelVal = regionInput.value.trim();
+    async function addRegion() {
+      const labelVal = input.value.trim();
       if (!labelVal) return;
       structured.brainRegions.push({
         label: labelVal,
@@ -269,29 +384,100 @@
       if (!(vocab.brainRegions || []).includes(labelVal)) {
         await addVocabOption("brainRegions", labelVal);
       }
-      regionInput.value = "";
+      input.value = "";
       ap.value = "";
       ml.value = "";
       dv.value = "";
-      renderAll();
+      renderChips();
+      renderList();
       scheduleSave();
-    };
+    }
 
-    addBtn.addEventListener("click", () => void addRegion());
-    regionInput.addEventListener("keydown", (e) => {
+    inner.addEventListener("mousedown", (e) => {
+      e.stopPropagation();
+      if (document.activeElement !== input) input.focus();
+      openDropdownEl(dropdown);
+      renderList();
+    });
+    dropdown.addEventListener("mousedown", (e) => e.stopPropagation());
+    input.addEventListener("focus", () => {
+      openDropdownEl(dropdown);
+      renderList();
+    });
+    input.addEventListener("input", () => {
+      openDropdownEl(dropdown);
+      renderList();
+    });
+    input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
         void addRegion();
+      } else if (e.key === "Escape") {
+        closeDropdown(dropdown);
       }
     });
 
-    row.append(regionInput, datalist, addBtn);
-    const hint = document.createElement("p");
-    hint.className = "meta-vocab-hint";
-    hint.textContent = "Optional AP / ML / DV (mm). Exported like: AP = -3.8; ML = 3; DV = 2.5, CA1";
+    [ap, ml, dv].forEach((el) => {
+      el.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          void addRegion();
+        }
+      });
+    });
 
-    section.append(label, chips, coords, row, hint);
+    inner.appendChild(input);
+    wrap.append(inner, dropdown);
+    section.append(label, wrap, coords);
+    const hint2 = document.createElement("p");
+    hint2.className = "meta-vocab-hint";
+    hint2.textContent =
+      "Optional AP / ML / DV (mm), then Enter. CSV: AP = -3.8; ML = 3, CA1";
+    section.appendChild(hint2);
+
+    renderChips();
     return section;
+  }
+
+  function setFromArticle(article) {
+    const nEl = $("meta-n-animals");
+    const cfEl = $("meta-cell-filter");
+    if (!article) {
+      structured = emptyStructured();
+      if (nEl) nEl.value = "";
+      if (cfEl) cfEl.value = "";
+      renderAll();
+      return;
+    }
+    const s = article.structured || {};
+    structured = {
+      species: [...(s.species || [])],
+      brainRegions: (s.brainRegions || []).map(normalizeBrainRegion),
+      behavioralParadigms: [...(s.behavioralParadigms || [])],
+      recordingMethods: [...(s.recordingMethods || [])],
+      cellTypes: [...(s.cellTypes || [])],
+      methods: [...(s.methods || [])],
+    };
+    if (nEl) nEl.value = article.nAnimals || s.nAnimals || "";
+    if (cfEl) {
+      cfEl.value =
+        article.cellFilterCriterion || s.cellFilterCriterion || "";
+    }
+    renderAll();
+  }
+
+  function readPayload() {
+    const nAnimals = ($("meta-n-animals")?.value || "").trim();
+    const cellFilterCriterion = ($("meta-cell-filter")?.value || "").trim();
+    return {
+      nAnimals,
+      cellFilterCriterion,
+      structured: {
+        ...structured,
+        nAnimals,
+        cellFilterCriterion,
+      },
+    };
   }
 
   function renderAll() {
@@ -300,7 +486,7 @@
     root.replaceChildren();
     for (const field of FIELDS) {
       root.appendChild(
-        field.coords ? renderBrainField(field) : renderListField(field)
+        field.coords ? renderBrainField(field) : createNotionMultiSelect(field)
       );
     }
   }
@@ -319,13 +505,19 @@
     }
   }
 
+  function bindScalarFields() {
+    for (const id of ["meta-n-animals", "meta-cell-filter"]) {
+      const el = $(id);
+      if (el && !el.dataset.bound) {
+        el.dataset.bound = "1";
+        el.addEventListener("input", scheduleSave);
+      }
+    }
+  }
+
   function init() {
     bindExportButtons();
-    const nEl = $("meta-n-animals");
-    if (nEl && !nEl.dataset.bound) {
-      nEl.dataset.bound = "1";
-      nEl.addEventListener("input", scheduleSave);
-    }
+    bindScalarFields();
     renderAll();
   }
 

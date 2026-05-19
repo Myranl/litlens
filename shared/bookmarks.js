@@ -12,24 +12,44 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   const MARKER_CLASS = "litlens-bookmark-marker";
 
+  function acceptTextNode(node) {
+    const p = node.parentElement;
+    if (!p || !node.nodeValue) return NodeFilter.FILTER_REJECT;
+    if (/^(SCRIPT|STYLE|NOSCRIPT)$/i.test(p.tagName)) {
+      return NodeFilter.FILTER_REJECT;
+    }
+    if (p.closest?.(`.${MARKER_CLASS}`)) return NodeFilter.FILTER_REJECT;
+    return NodeFilter.FILTER_ACCEPT;
+  }
+
+  /** Character offset in article text, ignoring bookmark marker glyphs. */
   function textOffsetFromRange(root, range) {
-    const pre = document.createRange();
-    pre.selectNodeContents(root);
-    pre.setEnd(range.startContainer, range.startOffset);
-    return pre.toString().length;
+    const pos = range.cloneRange();
+    pos.collapse(true);
+    let offset = 0;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: acceptTextNode,
+    });
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const nodeRange = document.createRange();
+      nodeRange.selectNode(node);
+      if (pos.compareBoundaryPoints(Range.START_TO_START, nodeRange) > 0) {
+        offset += node.nodeValue.length;
+        continue;
+      }
+      if (pos.compareBoundaryPoints(Range.START_TO_END, nodeRange) < 0) {
+        return offset;
+      }
+      if (pos.startContainer === node) return offset + pos.startOffset;
+      return offset;
+    }
+    return offset;
   }
 
   function rangeFromTextOffset(root, offset) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-      acceptNode(node) {
-        const p = node.parentElement;
-        if (!p) return NodeFilter.FILTER_REJECT;
-        if (/^(SCRIPT|STYLE|NOSCRIPT)$/i.test(p.tagName)) {
-          return NodeFilter.FILTER_REJECT;
-        }
-        if (p.closest?.(`.${MARKER_CLASS}`)) return NodeFilter.FILTER_REJECT;
-        return NodeFilter.FILTER_ACCEPT;
-      },
+      acceptNode: acceptTextNode,
     });
     let count = 0;
     while (walker.nextNode()) {
@@ -48,14 +68,7 @@
 
   function excerptAtOffset(root, offset, maxLen = 72) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-      acceptNode(node) {
-        const p = node.parentElement;
-        if (!p || /^(SCRIPT|STYLE|NOSCRIPT)$/i.test(p.tagName)) {
-          return NodeFilter.FILTER_REJECT;
-        }
-        if (p.closest?.(`.${MARKER_CLASS}`)) return NodeFilter.FILTER_REJECT;
-        return NodeFilter.FILTER_ACCEPT;
-      },
+      acceptNode: acceptTextNode,
     });
     let count = 0;
     let text = "";
@@ -87,7 +100,11 @@
     const anchor = range.cloneRange();
     if (!range.collapsed) anchor.collapse(true);
     const offset = textOffsetFromRange(root, anchor);
-    const selected = range.toString().replace(/\s+/g, " ").trim();
+    const selected = range
+      .cloneContents()
+      .textContent.replace(/\s+/g, " ")
+      .replace(/◆/g, "")
+      .trim();
     const excerpt =
       selected ||
       excerptAtOffset(root, offset) ||

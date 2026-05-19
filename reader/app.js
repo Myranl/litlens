@@ -7,10 +7,25 @@ let tagsDoc = { tags: [] };
 let currentId = null;
 let currentArticleTagIds = [];
 let currentArticleHtml = "";
+let currentArticle = null;
+let currentHighlightForceShown = [];
 const activeTagFilters = new Set();
 
 window.litlensCurrentId = () => currentId;
 window.litlensGetArticles = () => articles;
+window.litlensGetTermsDoc = () => termsDoc;
+window.litlensSaveTermsDoc = async (doc) => {
+  termsDoc = await api("/terms", { method: "PUT", body: JSON.stringify(doc) });
+  if (!termsDoc.categoryColumnLinks) termsDoc.categoryColumnLinks = {};
+  renderTermsPanel();
+  refreshArticleHighlights();
+};
+window.litlensRenderTermsPanel = () => renderTermsPanel();
+window.litlensOnColumnLinksChanged = () => {
+  if (currentArticle) reconcileAndSaveHighlightForceShown(currentArticle);
+  renderTermsPanel();
+  refreshArticleHighlights();
+};
 
 const COLOR_PALETTE = [
   "#4f98a3", "#e8af34", "#6daa45", "#d163a7", "#fdab43", "#5591c7",
@@ -20,6 +35,49 @@ const COLOR_PALETTE = [
 let colorPickCallback = null;
 
 const $ = (sel) => document.querySelector(sel);
+
+function escapeHtml(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** Prepare saved HTML for display in the reader. */
+function prepareArticleDisplayHtml(article) {
+  let html = article.html || "";
+  if (!html) return textToHtml(article.text || "");
+
+  if (
+    window.LitLensArticleExtract &&
+    !LitLensArticleExtract.isCleanExtractedHtml(html) &&
+    (html.includes('data-core-wrapper="header"') ||
+      html.includes('id="bodymatter"'))
+  ) {
+    const wrap = html.includes("<html")
+      ? html
+      : `<html><head></head><body>${html}</body></html>`;
+    const doc = new DOMParser().parseFromString(wrap, "text/html");
+    const extracted = LitLensArticleExtract.extractArticleContent(doc.body);
+    if ((extracted.text || "").length > 200) html = extracted.html;
+  }
+
+  if (!/<h1[\s>]/i.test(html) && article.title) {
+    const metaBits = [
+      article.authors ? `<p class="litlens-article-authors">${escapeHtml(article.authors)}</p>` : "",
+      article.journal || article.year
+        ? `<p class="litlens-article-meta">${escapeHtml(
+            [article.journal, article.year].filter(Boolean).join(" · ")
+          )}</p>`
+        : "",
+    ].join("");
+    html =
+      `<header class="litlens-article-header"><h1>${escapeHtml(article.title)}</h1>${metaBits}</header>` +
+      html;
+  }
+  return html;
+}
 
 async function api(path, opts = {}) {
   const res = await fetch(`${API}${path}`, {
@@ -32,6 +90,7 @@ async function api(path, opts = {}) {
   }
   return res.json();
 }
+window.litlensApi = api;
 
 function uid() {
   return Math.random().toString(36).slice(2, 10);
@@ -105,7 +164,7 @@ function readMetadataForm() {
 
 function fillMetadataForm(article) {
   if (!article) {
-    ["meta-title", "meta-authors", "meta-year", "meta-journal", "meta-url"].forEach((id) => {
+    ["meta-title", "meta-authors", "meta-year", "meta-journal", "meta-url", "meta-n-animals", "meta-cell-filter"].forEach((id) => {
       const el = document.getElementById(id);
       if (el) el.value = "";
     });
@@ -129,6 +188,61 @@ function scheduleSaveMetadata() {
 }
 window.litlensScheduleSaveMetadata = scheduleSaveMetadata;
 
+function getFilteredTermsDoc() {
+  if (!window.LitLensColumnLinks || !currentArticle) return termsDoc;
+  return LitLensColumnLinks.filterTermsForArticle(termsDoc, {
+    ...currentArticle,
+    highlightForceShown: currentHighlightForceShown,
+  });
+}
+
+function refreshArticleHighlights() {
+  const body = $("#article-body");
+  if (!body || body.style.display === "none" || !window.LitLensHighlight) return;
+  LitLensHighlight.applyHighlights(body, getFilteredTermsDoc());
+}
+window.litlensRefreshHighlights = refreshArticleHighlights;
+
+async function reconcileAndSaveHighlightForceShown(article) {
+  if (!currentId || !window.LitLensColumnLinks) return;
+  const next = LitLensColumnLinks.reconcileHighlightForceShown(
+    { ...article, highlightForceShown: currentHighlightForceShown },
+    termsDoc
+  );
+  const prev = [...currentHighlightForceShown].sort().join(",");
+  const nxt = [...next].sort().join(",");
+  if (prev !== nxt) {
+    currentHighlightForceShown = next;
+    await api(`/articles/${currentId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ highlightForceShown: next }),
+    });
+    const a = articles.find((x) => x.id === currentId);
+    if (a) a.highlightForceShown = [...next];
+    if (currentArticle) currentArticle.highlightForceShown = [...next];
+  }
+  refreshArticleHighlights();
+}
+
+async function toggleHighlightForceShown(categoryId) {
+  if (!currentId) return;
+  const set = new Set(currentHighlightForceShown);
+  if (set.has(categoryId)) set.delete(categoryId);
+  else set.add(categoryId);
+  currentHighlightForceShown = [...set];
+  await api(`/articles/${currentId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ highlightForceShown: currentHighlightForceShown }),
+  });
+  const a = articles.find((x) => x.id === currentId);
+  if (a) a.highlightForceShown = [...currentHighlightForceShown];
+  if (currentArticle) {
+    currentArticle.highlightForceShown = [...currentHighlightForceShown];
+  }
+  refreshArticleHighlights();
+  renderTermsPanel();
+}
+
 async function saveMetadata() {
   if (!currentId) return;
   const data = readMetadataForm();
@@ -137,8 +251,13 @@ async function saveMetadata() {
     body: JSON.stringify(data),
   });
   const a = articles.find((x) => x.id === currentId);
-  if (a) Object.assign(a, data);
-  if (data.structured) a.structured = data.structured;
+  if (a) {
+    Object.assign(a, data);
+    if (data.structured) a.structured = data.structured;
+  }
+  if (currentArticle) Object.assign(currentArticle, updated);
+  await reconcileAndSaveHighlightForceShown(updated);
+  renderTermsPanel();
   $("#topbar-title").textContent = updated.title || "Untitled";
   const link = $("#source-link");
   if (updated.url) {
@@ -160,6 +279,8 @@ function fillFieldFromSelection(field) {
     year: "meta-year",
     journal: "meta-journal",
     url: "meta-url",
+    nAnimals: "meta-n-animals",
+    cellFilterCriterion: "meta-cell-filter",
   };
   const id = map[field];
   if (!id) return;
@@ -216,6 +337,7 @@ async function loadAll() {
     StructuredMeta.init();
   }
   if (!tagsDoc.tags) tagsDoc.tags = [];
+  if (!termsDoc.categoryColumnLinks) termsDoc.categoryColumnLinks = {};
   renderTagFilters();
   renderArticleList();
   renderTermsPanel();
@@ -343,6 +465,10 @@ function renderArticleList() {
 async function selectArticle(id) {
   currentId = id;
   const article = await api(`/articles/${id}`);
+  currentArticle = article;
+  currentHighlightForceShown = Array.isArray(article.highlightForceShown)
+    ? [...article.highlightForceShown]
+    : [];
   $("#empty-state").style.display = "none";
   const body = $("#article-body");
   body.style.display = "block";
@@ -358,23 +484,40 @@ async function selectArticle(id) {
   $("#notes-area").value = article.notes || "";
   currentArticleTagIds = [...(article.tagIds || [])];
   fillMetadataForm(article);
-  currentArticleHtml = article.html || "";
   renderTagsPanel();
 
   if (article.html) {
     body.className = "article-body saved-html";
-    body.innerHTML = article.html;
+    const displayHtml = prepareArticleDisplayHtml(article);
+    currentArticleHtml = displayHtml;
+    body.innerHTML = displayHtml;
   } else {
+    currentArticleHtml = "";
     body.className = "article-body";
     body.innerHTML = textToHtml(article.text || "");
   }
 
-  LitLensHighlight.applyHighlights(body, termsDoc);
-  if (window.BookmarksUI) {
-    BookmarksUI.setFromArticle(article);
-    BookmarksUI.applyMarkers();
-  }
+  await reconcileAndSaveHighlightForceShown(article);
+  renderTermsPanel();
   renderArticleList();
+
+  const runPostLoad = () => {
+    try {
+      refreshArticleHighlights();
+      if (window.BookmarksUI) {
+        BookmarksUI.setFromArticle(article);
+        BookmarksUI.applyMarkers();
+        void BookmarksUI.autoDetectSectionsIfNeeded();
+      }
+    } catch (e) {
+      console.error("[LitLens] post-load failed:", e);
+    }
+  };
+  if (typeof requestIdleCallback === "function") {
+    requestIdleCallback(runPostLoad, { timeout: 800 });
+  } else {
+    setTimeout(runPostLoad, 0);
+  }
 }
 
 function renderTermsPanel() {
@@ -383,6 +526,20 @@ function renderTermsPanel() {
   for (const cat of termsDoc.categories) {
     const group = mkEl(D, "kw-group");
     const header = mkEl(D, "kw-group-header");
+    const linkCol =
+      window.LitLensColumnLinks &&
+      LitLensColumnLinks.getCategoryColumnLink(termsDoc, cat.id);
+    const colFilled =
+      linkCol &&
+      currentArticle &&
+      LitLensColumnLinks.isInfoColumnFilled(currentArticle, linkCol);
+    const hidden =
+      colFilled &&
+      LitLensColumnLinks.isCategoryHighlightsHidden(
+        { ...currentArticle, highlightForceShown: currentHighlightForceShown },
+        termsDoc,
+        cat.id
+      );
     const dot = mkEl(D, "kw-group-color");
     dot.style.background = cat.color;
     dot.title = "Change color";
@@ -402,7 +559,23 @@ function renderTermsPanel() {
     delCat.dataset.delCat = cat.id;
     delCat.style.cssText = "width:22px;height:22px;font-size:11px";
     delCat.textContent = "✕";
-    header.append(dot, nameInput, delCat);
+
+    if (colFilled) {
+      const hideBtn = document.createElement("button");
+      hideBtn.type = "button";
+      hideBtn.className = "kw-hide-highlights-btn" + (hidden ? " off" : "");
+      hideBtn.title = hidden
+        ? `${LitLensColumnLinks.columnLabel(linkCol)} filled — highlights hidden. Click to show.`
+        : `Highlights visible. Click to hide again (auto-hides when field is filled).`;
+      hideBtn.textContent = hidden ? "◌" : "◉";
+      hideBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        void toggleHighlightForceShown(cat.id);
+      });
+      header.append(dot, nameInput, hideBtn, delCat);
+    } else {
+      header.append(dot, nameInput, delCat);
+    }
 
     const chips = mkEl(D, "kw-chip-wrap");
     for (const t of termsDoc.terms.filter((x) => x.categoryId === cat.id)) {
@@ -463,6 +636,10 @@ function renderTermsPanel() {
       const id = el.dataset.delCat;
       termsDoc.categories = termsDoc.categories.filter((c) => c.id !== id);
       termsDoc.terms = termsDoc.terms.filter((t) => t.categoryId !== id);
+      if (termsDoc.categoryColumnLinks) delete termsDoc.categoryColumnLinks[id];
+      currentHighlightForceShown = currentHighlightForceShown.filter(
+        (x) => x !== id
+      );
       await saveTerms();
     });
   });
@@ -485,11 +662,10 @@ async function addTerm(categoryId, lemma) {
 }
 
 async function saveTerms() {
+  if (!termsDoc.categoryColumnLinks) termsDoc.categoryColumnLinks = {};
   termsDoc = await api("/terms", { method: "PUT", body: JSON.stringify(termsDoc) });
   renderTermsPanel();
-  if (currentId && $("#article-body").style.display !== "none") {
-    LitLensHighlight.applyHighlights($("#article-body"), termsDoc);
-  }
+  refreshArticleHighlights();
 }
 
 $("#add-category-btn").addEventListener("click", async () => {
@@ -660,6 +836,8 @@ $("#delete-btn").addEventListener("click", async () => {
   if (!currentId || !confirm("Delete this article from disk?")) return;
   await api(`/articles/${currentId}`, { method: "DELETE" });
   currentId = null;
+  currentArticle = null;
+  currentHighlightForceShown = [];
   $("#article-body").style.display = "none";
   $("#empty-state").style.display = "flex";
   $("#topbar-title").textContent = "Select an article";
@@ -725,6 +903,15 @@ $("#modal-save").addEventListener("click", async () => {
     if (!html) return alert("Paste HTML content");
     text = stripHtmlToText(html);
   }
+  if (window.LitLensArticleExtract && html) {
+    const wrap = html.includes("<html") ? html : `<html><head></head><body>${html}</body></html>`;
+    const doc = new DOMParser().parseFromString(wrap, "text/html");
+    const extracted = LitLensArticleExtract.extractArticleContent(doc.body);
+    if ((extracted.text || "").length > 200) {
+      html = extracted.html;
+      text = extracted.text;
+    }
+  }
   let payload = { title, url, html, text };
   if (window.LitLensMetadata && html) {
     const wrap = html.includes("<html") ? html : `<html><head></head><body>${html}</body></html>`;
@@ -739,6 +926,10 @@ $("#modal-save").addEventListener("click", async () => {
       html,
       text,
     };
+  }
+  if (window.LitLensSectionDetect && html) {
+    const wrap = html.includes("<html") ? html : `<html><head></head><body>${html}</body></html>`;
+    payload.bookmarks = LitLensSectionDetect.detectSectionBookmarks(wrap);
   }
   const res = await fetch(`${API}/articles`, {
     method: "POST",
@@ -846,10 +1037,60 @@ $("#cross-search").addEventListener("keydown", (e) => {
 
 $("#search-input").addEventListener("input", renderArticleList);
 
-let theme = "dark";
+const THEME_STORAGE_KEY = "litlens-theme";
+const DAY_START_HOUR = 7;
+const DAY_END_HOUR = 20;
+
+function themeFromLocalHour(date = new Date()) {
+  const h = date.getHours();
+  return h >= DAY_START_HOUR && h < DAY_END_HOUR ? "light" : "dark";
+}
+
+function resolvedTheme(pref) {
+  return pref === "auto" ? themeFromLocalHour() : pref;
+}
+
+function updateThemeToggleUi(pref) {
+  const btn = $("#theme-toggle");
+  if (!btn) return;
+  const labels = {
+    auto: "Auto (day/night by system time)",
+    light: "Light mode",
+    dark: "Dark mode",
+  };
+  const icons = { auto: "◐", light: "☀", dark: "☾" };
+  btn.textContent = icons[pref] || "◐";
+  btn.title = labels[pref] || labels.auto;
+}
+
+function applyTheme(pref) {
+  document.documentElement.setAttribute("data-theme", resolvedTheme(pref));
+  updateThemeToggleUi(pref);
+}
+
+let themePref = localStorage.getItem(THEME_STORAGE_KEY) || "auto";
+if (!["auto", "light", "dark"].includes(themePref)) themePref = "auto";
+applyTheme(themePref);
+
+let themeAutoTimer = null;
+function scheduleThemeAutoCheck() {
+  if (themeAutoTimer) clearInterval(themeAutoTimer);
+  if (themePref !== "auto") {
+    themeAutoTimer = null;
+    return;
+  }
+  themeAutoTimer = setInterval(() => {
+    if (themePref === "auto") applyTheme("auto");
+  }, 60_000);
+}
+scheduleThemeAutoCheck();
+
 $("#theme-toggle").addEventListener("click", () => {
-  theme = theme === "dark" ? "light" : "dark";
-  document.documentElement.setAttribute("data-theme", theme);
+  themePref =
+    themePref === "auto" ? "light" : themePref === "light" ? "dark" : "auto";
+  localStorage.setItem(THEME_STORAGE_KEY, themePref);
+  applyTheme(themePref);
+  scheduleThemeAutoCheck();
 });
 
 loadAll();

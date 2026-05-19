@@ -106,12 +106,20 @@ function extractPageMetadata() {
     ld.year ||
     "";
 
-  const root =
-    document.querySelector(
-      "main, article, [role=main], .article-body, .article-content"
-    ) || document.body;
-  const html = root.innerHTML;
-  const text = (root.innerText || "").replace(/\n{3,}/g, "\n\n").trim();
+  let html;
+  let text;
+  if (typeof LitLensArticleExtract !== "undefined") {
+    const extracted = LitLensArticleExtract.extractArticleContent(doc);
+    html = extracted.html;
+    text = extracted.text;
+  } else {
+    const root =
+      document.querySelector(
+        "main, article, [role=main], .article-body, .article-content"
+      ) || document.body;
+    html = root.innerHTML;
+    text = (root.innerText || "").replace(/\n{3,}/g, "\n\n").trim();
+  }
 
   return {
     title: title || "Untitled",
@@ -123,3 +131,19 @@ function extractPageMetadata() {
     text,
   };
 }
+
+/** Called from popup after section-detect.js is injected. */
+function extractPageForLitLens() {
+  const meta = extractPageMetadata();
+  const root =
+    typeof LitLensArticleExtract !== "undefined"
+      ? LitLensArticleExtract.findArticleRoot(document)
+      : document.querySelector(
+          "main, article, [role=main], .article-body, .article-content"
+        ) || document.body;
+  if (typeof LitLensSectionDetect !== "undefined" && root) {
+    meta.bookmarks = LitLensSectionDetect.detectSectionBookmarks(root);
+  }
+  return meta;
+}
+

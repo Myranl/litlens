@@ -64,7 +64,8 @@ app.get("/api/articles/:id", (req, res) => {
 });
 
 app.post("/api/articles", (req, res) => {
-  const { title, url, html, text, status, authors, year, journal } = req.body || {};
+  const { title, url, html, text, status, authors, year, journal, bookmarks } =
+    req.body || {};
   if (!text && !html) {
     return res.status(400).json({ error: "html or text required" });
   }
@@ -78,6 +79,7 @@ app.post("/api/articles", (req, res) => {
       authors,
       year,
       journal,
+      bookmarks,
     });
     res.status(201).json(article);
   } catch (e) {
@@ -104,7 +106,10 @@ app.patch("/api/articles/:id", (req, res) => {
     url,
     structured,
     nAnimals,
+    cellFilterCriterion,
     bookmarks,
+    highlightSuppressed,
+    highlightForceShown,
   } = req.body || {};
   if (notes !== undefined) storage.saveArticleNotes(req.params.id, notes);
   const patch = {};
@@ -117,7 +122,10 @@ app.patch("/api/articles/:id", (req, res) => {
   if (url !== undefined) patch.url = url;
   if (structured !== undefined) patch.structured = structured;
   if (nAnimals !== undefined) patch.nAnimals = nAnimals;
+  if (cellFilterCriterion !== undefined) patch.cellFilterCriterion = cellFilterCriterion;
   if (bookmarks !== undefined) patch.bookmarks = bookmarks;
+  if (highlightSuppressed !== undefined) patch.highlightSuppressed = highlightSuppressed;
+  if (highlightForceShown !== undefined) patch.highlightForceShown = highlightForceShown;
   if (Object.keys(patch).length) storage.updateArticleMeta(req.params.id, patch);
   const article = storage.getArticle(req.params.id);
   if (!article) return res.status(404).json({ error: "not found" });

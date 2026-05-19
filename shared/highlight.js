@@ -41,10 +41,9 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-const SKIP_PARENT =
-  /^(SCRIPT|STYLE|NOSCRIPT|TEXTAREA|INPUT|MARK|CODE|PRE)$/i;
+const SKIP_PARENT = /^(SCRIPT|STYLE|NOSCRIPT|TEXTAREA|INPUT|CODE|PRE)$/i;
 
-function collectTextNodes(root) {
+function collectTextNodes(root, forCategoryId) {
   const nodes = [];
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
@@ -52,7 +51,10 @@ function collectTextNodes(root) {
       if (!p || !node.nodeValue?.trim()) return NodeFilter.FILTER_REJECT;
       if (SKIP_PARENT.test(p.tagName)) return NodeFilter.FILTER_REJECT;
       if (p.closest?.("[data-litlens-ignore]")) return NodeFilter.FILTER_REJECT;
-      if (p.closest?.("mark.kw-highlight")) return NodeFilter.FILTER_REJECT;
+      const existingMark = p.closest?.("mark.kw-highlight");
+      if (existingMark && existingMark.dataset.categoryId === forCategoryId) {
+        return NodeFilter.FILTER_REJECT;
+      }
       return NodeFilter.FILTER_ACCEPT;
     },
   });
@@ -100,7 +102,7 @@ function applyHighlights(root, termsDoc) {
     let iterations = 0;
     const maxIter = 2000;
     while (iterations++ < maxIter) {
-      const nodes = collectTextNodes(root);
+      const nodes = collectTextNodes(root, meta.categoryId);
       let matched = false;
       for (const textNode of nodes) {
         const text = textNode.nodeValue;

@@ -185,11 +185,14 @@ function removeDomHighlights(root) {
 
 /** Same root as “Save page” in popup */
 function getArticleRoot() {
-  const el =
+  if (typeof LitLensArticleExtract !== "undefined") {
+    return LitLensArticleExtract.findArticleRoot(document) || document.body;
+  }
+  return (
     document.querySelector(
       "main, article, [role=main], .article-body, .article-content, #content"
-    ) || document.body;
-  return el;
+    ) || document.body
+  );
 }
 
 function applyHighlights(root, termsDoc) {

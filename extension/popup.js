@@ -36,11 +36,12 @@ async function lookupCurrentPage(tab) {
 
 function setSavedState(article) {
   savedArticleId = article?.id || null;
-  if (article) {
+  const title = article?.title || "Untitled";
+  if (article?.id) {
     saveBtn.disabled = true;
     saveBtn.textContent = "Already saved";
     deleteBtn.style.display = "block";
-    status.textContent = `In library: ${article.title.slice(0, 42)}${article.title.length > 42 ? "…" : ""}`;
+    status.textContent = `In library: ${title.slice(0, 42)}${title.length > 42 ? "…" : ""}`;
     status.classList.add("saved");
   } else {
     saveBtn.disabled = false;
@@ -75,6 +76,41 @@ async function refreshUI() {
   }
 }
 
+/** Inject scripts and wait for save-runner.js to post LITLENS_SAVE_RESULT. */
+function savePageViaInjection(tabId) {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      chrome.runtime.onMessage.removeListener(onMsg);
+      reject(new Error("Save timed out (page too large or blocked)"));
+    }, 120_000);
+
+    function onMsg(msg) {
+      if (msg?.type !== "LITLENS_SAVE_RESULT") return;
+      clearTimeout(timeout);
+      chrome.runtime.onMessage.removeListener(onMsg);
+      resolve(msg.result);
+    }
+
+    chrome.runtime.onMessage.addListener(onMsg);
+
+    chrome.scripting
+      .executeScript({
+        target: { tabId },
+        files: [
+          "article-extract.js",
+          "section-detect.js",
+          "metadata-extract.js",
+          "save-runner.js",
+        ],
+      })
+      .catch((e) => {
+        clearTimeout(timeout);
+        chrome.runtime.onMessage.removeListener(onMsg);
+        reject(e);
+      });
+  });
+}
+
 saveBtn.addEventListener("click", async () => {
   const health = await checkHealth();
   if (!health) {
@@ -85,6 +121,11 @@ saveBtn.addEventListener("click", async () => {
   const tab = await getActiveTab();
   if (!tab?.id) return;
 
+  if (!tab.url?.startsWith("http")) {
+    status.textContent = "Open an article page (http/https) first";
+    return;
+  }
+
   const existing = await lookupCurrentPage(tab);
   if (existing) {
     setSavedState(existing);
@@ -92,39 +133,40 @@ saveBtn.addEventListener("click", async () => {
     return;
   }
 
-  const [{ result }] = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    files: ["metadata-extract.js"],
-    func: () => extractPageMetadata(),
-  });
+  status.textContent = "Reading page…";
+  status.classList.remove("saved");
 
-  if (!result?.text) {
-    status.textContent = "Could not read page text";
+  let saveResult;
+  try {
+    saveResult = await savePageViaInjection(tab.id);
+  } catch (e) {
+    console.error("[LitLens] page extract failed:", e);
+    status.textContent =
+      e?.message?.includes("Cannot access") ||
+      e?.message?.includes("permission")
+        ? "Cannot read this page (reload tab, then try again)"
+        : `Could not read page (${e?.message || "script error"})`;
     return;
   }
 
-  status.textContent = "Saving…";
-  status.classList.remove("saved");
-  try {
-    const res = await fetch(`${API}/articles`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(result),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (res.status === 409) {
-      setSavedState(body.existing);
+  if (!saveResult?.ok) {
+    if (saveResult?.duplicate && saveResult.existing) {
+      setSavedState(saveResult.existing);
       status.textContent = "Already saved (duplicate URL blocked)";
       return;
     }
-    if (!res.ok) throw new Error(body.error || "save failed");
-    setSavedState(body);
-    status.textContent = `Saved: ${body.title.slice(0, 40)}…`;
-    await ensureScriptsAndRefresh(tab.id);
-  } catch {
-    status.textContent = "Save failed";
-    await refreshUI();
+    const err = saveResult?.error || "unknown";
+    status.textContent =
+      err === "no_text"
+        ? "Could not read page text (reload and scroll to full article)"
+        : `Save failed: ${err}`;
+    return;
   }
+
+  setSavedState(saveResult.article);
+  const title = saveResult.article?.title || "Untitled";
+  status.textContent = `Saved: ${title.slice(0, 40)}${title.length > 40 ? "…" : ""}`;
+  ensureScriptsAndRefresh(tab.id).catch(() => {});
 });
 
 deleteBtn.addEventListener("click", async () => {
@@ -155,11 +197,11 @@ async function ensureScriptsAndRefresh(tabId) {
   } catch {
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ["highlight.js", "content.js"],
+      files: ["article-extract.js", "highlight.js", "content.js"],
     });
     await new Promise((r) => setTimeout(r, 150));
   }
-  await chrome.tabs.sendMessage(tabId, { type: "REFRESH_HIGHLIGHTS" });
+  await chrome.tabs.sendMessage(tabId, { type: "REFRESH_HIGHLIGHTS" }).catch(() => {});
 }
 
 document.getElementById("highlight-btn").addEventListener("click", async () => {

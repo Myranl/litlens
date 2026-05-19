@@ -118,6 +118,9 @@ function normalizeArticleMeta(meta) {
   if (meta.cellTypes) structured.cellTypes = meta.cellTypes;
   if (meta.methods) structured.methods = meta.methods;
   if (meta.nAnimals != null) structured.nAnimals = meta.nAnimals;
+  if (meta.cellFilterCriterion != null) {
+    structured.cellFilterCriterion = meta.cellFilterCriterion;
+  }
 
   return {
     authors: "",
@@ -129,7 +132,15 @@ function normalizeArticleMeta(meta) {
     url: meta.url || "",
     structured,
     nAnimals: structured.nAnimals || meta.nAnimals || "",
+    cellFilterCriterion:
+      meta.cellFilterCriterion || structured.cellFilterCriterion || "",
     bookmarks: Array.isArray(meta.bookmarks) ? meta.bookmarks : [],
+    highlightSuppressed: Array.isArray(meta.highlightSuppressed)
+      ? meta.highlightSuppressed
+      : [],
+    highlightForceShown: Array.isArray(meta.highlightForceShown)
+      ? meta.highlightForceShown
+      : [],
   };
 }
 
@@ -165,7 +176,8 @@ function articleToCsvRow(meta) {
     "behavioral paradigm": joinList(s.behavioralParadigms),
     "brain region": brainStr,
     "cell sorting methods": "",
-    cell_filter_criterion: "",
+    cell_filter_criterion:
+      meta.cellFilterCriterion || s.cellFilterCriterion || "",
     cell_type: joinList(s.cellTypes),
     journal: meta.journal || "",
     main_question_tag: "",
@@ -214,7 +226,17 @@ function exportMetaCsv() {
   return lines.join("\n");
 }
 
-function saveArticle({ title, url, html, text, status, authors, year, journal }) {
+function saveArticle({
+  title,
+  url,
+  html,
+  text,
+  status,
+  authors,
+  year,
+  journal,
+  bookmarks,
+}) {
   if (url) {
     const existing = findArticleByUrl(url);
     if (existing) {
@@ -239,6 +261,7 @@ function saveArticle({ title, url, html, text, status, authors, year, journal })
     addedAt,
     status: status || "new",
     tagIds: [],
+    bookmarks: Array.isArray(bookmarks) ? bookmarks : [],
   });
   writeJson(path.join(dir, "meta.json"), meta);
   if (html) fs.writeFileSync(path.join(dir, "page.html"), html, "utf8");

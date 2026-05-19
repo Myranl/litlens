@@ -14,11 +14,48 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
+async function saveArticleToServer(meta) {
+  const res = await fetch(`${API}/articles`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(meta),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (res.status === 409) {
+    return { ok: false, duplicate: true, existing: body.existing };
+  }
+  if (!res.ok) {
+    return {
+      ok: false,
+      error: body.message || body.error || `HTTP ${res.status}`,
+    };
+  }
+  return {
+    ok: true,
+    article: { id: body.id, title: body.title || meta?.title || "Untitled" },
+  };
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "GET_TERMS") {
     fetchTermsFromServer()
       .then((terms) => sendResponse({ ok: true, terms }))
       .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+  if (msg.type === "LITLENS_SAVE_ARTICLE") {
+    saveArticleToServer(msg.meta)
+      .then((result) => sendResponse(result))
+      .catch((e) => {
+        const msgText = e?.message || "network";
+        sendResponse({
+          ok: false,
+          error:
+            msgText === "Failed to fetch"
+              ? "Server not running (npm start in ~/litlens)"
+              : msgText,
+        });
+      });
     return true;
   }
 });
