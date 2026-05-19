@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: system-ui, sans-serif; width: 280px; margin: 0; padding: 14px; font-size: 13px; color: #1a1a1a; }
+    h1 { font-size: 15px; margin: 0 0 10px; }
+    button { width: 100%; padding: 10px; margin-bottom: 8px; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .primary { background: #4f98a3; color: #fff; }
+    .ghost { background: #eee; color: #333; }
+    .danger { background: #fff; color: #b33; border: 1px solid #e0b4b4; }
+    .danger:hover:not(:disabled) { background: #fdf0f0; }
+    .status { font-size: 11px; color: #666; min-height: 16px; margin-bottom: 8px; line-height: 1.4; }
+    .status.saved { color: #3d7a85; }
+    a.reader-link { color: #3d7a85; text-decoration: none; font-size: 12px; font-weight: 500; }
+    a.reader-link:hover { color: #227f8b; text-decoration: underline; }
+    #delete-btn { display: none; }
+  </style>
+</head>
+<body>
+  <h1>LitLens</h1>
+  <p class="status" id="status">Checking server…</p>
+  <button class="primary" id="save-btn">Save this page to disk</button>
+  <button class="ghost" id="highlight-btn">Refresh highlights</button>
+  <button class="danger" id="delete-btn">Remove from library</button>
+  <p><a class="reader-link" href="http://127.0.0.1:17321/" target="_blank" rel="noopener">Open reader →</a></p>
+  <script src="popup.js"></script>
+</body>
+</html>

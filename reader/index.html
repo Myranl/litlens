@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LitLens — Literature Review</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="sidebar-header">
+      <div style="flex:1">
+        <div class="logo-text">LitLens</div>
+        <div class="logo-sub">Local literature review</div>
+        <div class="server-status" id="server-status">Connecting to server…</div>
+      </div>
+      <button class="icon-btn" id="theme-toggle" title="Toggle theme">◐</button>
+    </div>
+    <div class="search-wrap">
+      <div class="search-input-wrap">
+        <input class="search-input" id="search-input" type="search" placeholder="Search articles…" autocomplete="off">
+      </div>
+    </div>
+    <div class="tag-filter-section" id="tag-filter-section" style="display:none">
+      <div class="tag-filter-label">Filter by tag</div>
+      <div class="tag-filter-wrap" id="tag-filter-wrap"></div>
+      <button type="button" class="tag-filter-clear" id="tag-filter-clear" style="display:none">Clear filter</button>
+    </div>
+    <div class="article-list" id="article-list"></div>
+    <div class="sidebar-footer">
+      <button class="btn-sm btn-primary" id="add-article-btn">+ Article</button>
+      <button class="btn-sm btn-ghost" id="import-html-btn" title="Import .html from disk">HTML</button>
+      <button class="btn-sm btn-ghost" id="export-meta-csv-sidebar" title="Export META CSV">CSV</button>
+      <input type="file" id="import-html-file" accept=".html,.htm,text/html" hidden>
+    </div>
+  </aside>
+
+  <main id="main">
+    <div id="topbar">
+      <span class="topbar-title" id="topbar-title">Select an article</span>
+      <a class="btn-sm btn-ghost" id="source-link" href="#" target="_blank" rel="noopener" style="display:none;font-size:11px">Source ↗</a>
+      <button class="icon-btn" id="delete-btn" title="Delete article" style="display:none">✕</button>
+    </div>
+    <div id="article-view">
+      <div class="empty-state" id="empty-state">
+        <h2>LitLens Reader</h2>
+        <p style="max-width:42ch;margin-bottom:12px">Articles are stored in <code>~/LiteratureReview</code>. Save pages from the browser extension, or paste text / HTML here.</p>
+        <p style="font-size:12px">Start the server: <code>cd ~/litlens && npm start</code></p>
+        <button type="button" class="btn-add-article" id="empty-add-btn" style="margin-top:16px;max-width:220px">Add article</button>
+      </div>
+      <div class="article-body" id="article-body" style="display:none"></div>
+    </div>
+  </main>
+
+  <aside id="right-panel">
+    <div class="panel-tabs">
+      <button class="panel-tab active" data-tab="terms">Terms</button>
+      <button class="panel-tab" data-tab="meta">Info</button>
+      <button class="panel-tab" data-tab="tags">Tags</button>
+      <button class="panel-tab" data-tab="notes">Notes</button>
+      <button class="panel-tab" data-tab="marks">Marks</button>
+      <button class="panel-tab" data-tab="search">Search</button>
+    </div>
+    <div class="panel-content active" id="tab-terms">
+      <div id="terms-panel"></div>
+      <button class="add-group-btn" id="add-category-btn">+ Category</button>
+    </div>
+    <div class="panel-content" id="tab-meta">
+      <p class="meta-hint">Select text in the article, then click <strong>+</strong> to fill a field. Edits save automatically.</p>
+      <div class="meta-actions" id="meta-actions" style="display:none">
+        <button type="button" class="btn-sm btn-ghost" id="meta-autofill-btn">Auto-fill from page</button>
+      </div>
+      <div class="meta-field">
+        <label class="form-label" for="meta-title">Title</label>
+        <div class="meta-field-row">
+          <input class="form-input" id="meta-title" type="text" autocomplete="off">
+          <button type="button" class="meta-fill-btn" data-fill="title" title="Fill from selection">+</button>
+        </div>
+      </div>
+      <div class="meta-field">
+        <label class="form-label" for="meta-authors">Authors</label>
+        <div class="meta-field-row">
+          <input class="form-input" id="meta-authors" type="text" autocomplete="off">
+          <button type="button" class="meta-fill-btn" data-fill="authors" title="Fill from selection">+</button>
+        </div>
+      </div>
+      <div class="meta-field">
+        <label class="form-label" for="meta-year">Year</label>
+        <div class="meta-field-row">
+          <input class="form-input" id="meta-year" type="text" inputmode="numeric" autocomplete="off">
+          <button type="button" class="meta-fill-btn" data-fill="year" title="Fill from selection">+</button>
+        </div>
+      </div>
+      <div class="meta-field">
+        <label class="form-label" for="meta-journal">Journal</label>
+        <div class="meta-field-row">
+          <input class="form-input" id="meta-journal" type="text" autocomplete="off">
+          <button type="button" class="meta-fill-btn" data-fill="journal" title="Fill from selection">+</button>
+        </div>
+      </div>
+      <div class="meta-field">
+        <label class="form-label" for="meta-url">Source URL</label>
+        <div class="meta-field-row">
+          <input class="form-input" id="meta-url" type="url" autocomplete="off">
+          <button type="button" class="meta-fill-btn" data-fill="url" title="Fill from selection">+</button>
+        </div>
+      </div>
+      <hr style="border:none;border-top:1px solid var(--color-divider);margin:14px 0">
+      <p class="notes-label" style="margin-bottom:8px">Study metadata (multi-select)</p>
+      <div class="meta-field">
+        <label class="form-label" for="meta-n-animals">N animals</label>
+        <input class="form-input" id="meta-n-animals" type="text" inputmode="numeric" placeholder="e.g. 12" style="margin-bottom:0">
+      </div>
+      <div id="meta-structured-fields"></div>
+      <button type="button" class="btn-sm btn-primary" id="export-meta-csv-btn" style="width:100%;margin-top:14px">Export all as CSV</button>
+    </div>
+    <div class="panel-content" id="tab-tags">
+      <div class="article-tags-panel" id="article-tags-assign" style="display:none">
+        <p class="notes-label">Tags on this article</p>
+        <div id="article-tag-toggles"></div>
+      </div>
+      <p class="notes-label">Manage tags</p>
+      <p class="meta-hint" style="margin-top:0;margin-bottom:8px">Select text in the article, then <strong>+</strong> to create a tag (assigned to the open article).</p>
+      <div id="tags-def-list"></div>
+      <div class="kw-add-input" style="margin-top:8px">
+        <input class="kw-input" id="new-tag-name" placeholder="Tag name…">
+        <button type="button" class="kw-add-btn" id="new-tag-btn" title="Add tag (from selection or typed name)">+</button>
+      </div>
+    </div>
+
+    <div class="panel-content" id="tab-marks">
+      <p class="meta-hint" style="margin-top:0">Place the cursor in the article (or select text), then add a bookmark. Click a bookmark to jump there.</p>
+      <div class="bookmarks-actions">
+        <button type="button" class="btn-sm btn-primary" id="add-methods-bookmark-btn">+ Methods</button>
+        <button type="button" class="btn-sm btn-ghost" id="add-bookmark-btn">+ Bookmark</button>
+      </div>
+      <p class="bookmarks-empty" id="bookmarks-empty"></p>
+      <div class="bookmarks-list" id="bookmarks-list"></div>
+    </div>
+    <div class="panel-content" id="tab-notes">
+      <textarea class="notes-area" id="notes-area" placeholder="Notes for the current article…"></textarea>
+    </div>
+    <div class="panel-content" id="tab-search">
+      <div class="kw-add-input">
+        <input class="kw-input" id="cross-search" placeholder="Search string…">
+        <button class="kw-add-btn" id="cross-search-btn">Go</button>
+      </div>
+      <div id="search-results" style="margin-top:10px"></div>
+    </div>
+  </aside>
+</div>
+
+<div id="color-picker-popup" class="color-picker-popup"></div>
+
+<div id="ctx-menu">
+  <div class="ctx-title">Add term to category</div>
+  <div id="ctx-categories"></div>
+</div>
+
+<div id="modal-overlay">
+  <div class="modal">
+    <div class="modal-title">Add article</div>
+    <div class="modal-sub">No URL fetching: paste text from the publisher site (after login) or import saved HTML.</div>
+    <div class="modal-tabs">
+      <button class="modal-tab active" data-modal="text">Text</button>
+      <button class="modal-tab" data-modal="html">HTML</button>
+    </div>
+    <label class="form-label" for="modal-title">Title</label>
+    <input class="form-input" id="modal-title" placeholder="Author, year — topic">
+    <label class="form-label" for="modal-url">Source URL (optional)</label>
+    <input class="form-input" id="modal-url" type="url" placeholder="https://doi.org/...">
+    <div id="modal-text-pane">
+      <label class="form-label" for="modal-text">Article text</label>
+      <textarea class="form-input" id="modal-text" rows="8" placeholder="Select all on the publisher page → copy → paste here"></textarea>
+    </div>
+    <div id="modal-html-pane" style="display:none">
+      <label class="form-label" for="modal-html">HTML (fragment or full page)</label>
+      <textarea class="form-input" id="modal-html" rows="6" placeholder="&lt;article&gt;… or full &lt;html&gt;"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" id="modal-cancel">Cancel</button>
+      <button class="btn-confirm" id="modal-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="/shared/highlight.js"></script>
+<script src="/shared/bookmarks.js"></script>
+<script src="/shared/metadata.js"></script>
+<script src="app.js"></script>
+<script src="structured-meta.js"></script>
+<script src="bookmarks-ui.js"></script>
+</body>
+</html>

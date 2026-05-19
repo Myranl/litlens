@@ -1,0 +1,14 @@
+/* LitLens keyword highlights on publisher pages */
+mark.kw-highlight {
+  border-radius: 3px !important;
+  padding: 0 2px !important;
+  color: inherit !important;
+  font-weight: inherit !important;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+mark.kw-highlight a {
+  color: inherit !important;
+  text-decoration: underline !important;
+}

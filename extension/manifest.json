@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "LitLens",
+  "version": "0.1.3",
+  "description": "Save articles and highlight terms for literature review",
+  "permissions": ["activeTab", "scripting", "contextMenus", "storage"],
+  "host_permissions": ["http://127.0.0.1:17321/*", "<all_urls>"],
+  "action": {
+    "default_title": "LitLens",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["highlight.js", "content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}
