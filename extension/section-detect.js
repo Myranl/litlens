@@ -37,7 +37,16 @@
       label: "Conclusion",
       keys: ["conclusion", "conclusions", "concluding remarks", "summary and conclusions"],
     },
-    { label: "References", keys: ["references", "bibliography", "literature cited"] },
+    {
+      label: "References",
+      keys: [
+        "references",
+        "reference list",
+        "bibliography",
+        "literature cited",
+        "works cited",
+      ],
+    },
     {
       label: "Acknowledgments",
       keys: ["acknowledgments", "acknowledgements", "acknowledgment", "funding"],

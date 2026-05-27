@@ -11,6 +11,7 @@ const ARTICLES_DIR = path.join(DATA_ROOT, "articles");
 const TERMS_FILE = path.join(DATA_ROOT, "terms.json");
 const TAGS_FILE = path.join(DATA_ROOT, "tags.json");
 const VOCAB_FILE = path.join(DATA_ROOT, "vocab.json");
+const PASSAGE_CITATIONS_FILE = path.join(DATA_ROOT, "passage-citations.json");
 
 const DEFAULT_TERMS = {
   categories: [
@@ -43,6 +44,9 @@ function ensureDataDirs() {
   if (!fs.existsSync(VOCAB_FILE)) {
     fs.writeFileSync(VOCAB_FILE, JSON.stringify(VOCAB_DEFAULTS, null, 2), "utf8");
   }
+  if (!fs.existsSync(PASSAGE_CITATIONS_FILE)) {
+    fs.writeFileSync(PASSAGE_CITATIONS_FILE, "{}", "utf8");
+  }
 }
 
 module.exports = {
@@ -51,6 +55,7 @@ module.exports = {
   TERMS_FILE,
   TAGS_FILE,
   VOCAB_FILE,
+  PASSAGE_CITATIONS_FILE,
   DEFAULT_TERMS,
   DEFAULT_TAGS,
   VOCAB_DEFAULTS,

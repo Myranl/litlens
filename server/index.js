@@ -110,6 +110,13 @@ app.patch("/api/articles/:id", (req, res) => {
     bookmarks,
     highlightSuppressed,
     highlightForceShown,
+    methodSuggestionsDismissed,
+    methodSuggestionsDismissedHits,
+    methodEvidence,
+    foundTermAliases,
+    readParagraphOffsets,
+    readParagraphKeys,
+    methodsParagraphTotal,
   } = req.body || {};
   if (notes !== undefined) storage.saveArticleNotes(req.params.id, notes);
   const patch = {};
@@ -126,6 +133,35 @@ app.patch("/api/articles/:id", (req, res) => {
   if (bookmarks !== undefined) patch.bookmarks = bookmarks;
   if (highlightSuppressed !== undefined) patch.highlightSuppressed = highlightSuppressed;
   if (highlightForceShown !== undefined) patch.highlightForceShown = highlightForceShown;
+  if (methodSuggestionsDismissed !== undefined) {
+    patch.methodSuggestionsDismissed = methodSuggestionsDismissed;
+  }
+  if (methodSuggestionsDismissedHits !== undefined) {
+    patch.methodSuggestionsDismissedHits = methodSuggestionsDismissedHits;
+  }
+  if (methodEvidence !== undefined && typeof methodEvidence === "object") {
+    patch.methodEvidence = methodEvidence;
+  }
+  if (foundTermAliases !== undefined && typeof foundTermAliases === "object") {
+    patch.foundTermAliases = foundTermAliases;
+  }
+  if (readParagraphOffsets !== undefined && Array.isArray(readParagraphOffsets)) {
+    patch.readParagraphOffsets = readParagraphOffsets.filter(
+      (n) => typeof n === "number" && n >= 0
+    );
+  }
+  if (readParagraphKeys !== undefined && Array.isArray(readParagraphKeys)) {
+    patch.readParagraphKeys = readParagraphKeys.filter(
+      (k) => typeof k === "string" && k.trim()
+    );
+  }
+  if (
+    methodsParagraphTotal !== undefined &&
+    typeof methodsParagraphTotal === "number" &&
+    methodsParagraphTotal >= 0
+  ) {
+    patch.methodsParagraphTotal = Math.floor(methodsParagraphTotal);
+  }
   if (Object.keys(patch).length) storage.updateArticleMeta(req.params.id, patch);
   const article = storage.getArticle(req.params.id);
   if (!article) return res.status(404).json({ error: "not found" });
@@ -144,8 +180,30 @@ app.get("/api/vocab", (_req, res) => {
 });
 
 app.put("/api/vocab", (req, res) => {
-  storage.saveVocab(req.body);
-  res.json(storage.getVocab());
+  try {
+    storage.saveVocab(req.body);
+    res.json(storage.getVocab());
+  } catch (e) {
+    console.error("PUT /api/vocab failed:", e);
+    res.status(500).json({
+      error: e.message || "Could not save vocab",
+    });
+  }
+});
+
+app.get("/api/passage-citations", (_req, res) => {
+  res.json({ citations: storage.loadPassageCitations() });
+});
+
+app.post("/api/passage-citations", (req, res) => {
+  try {
+    const { id, entry, created } = storage.registerPassageCitation(req.body || {});
+    const label = entry.label || "";
+    const token = `[[cite:${id}${label ? `|${label.replace(/\|/g, " ")}` : ""}]]`;
+    res.status(created ? 201 : 200).json({ id, token, entry, created });
+  } catch (e) {
+    res.status(400).json({ error: e.message || "Invalid citation" });
+  }
 });
 
 app.get("/api/export/meta.csv", (_req, res) => {

@@ -23,17 +23,26 @@
 <div id="app">
   <aside id="sidebar">
     <div class="sidebar-header">
-      <div style="flex:1">
-        <div class="logo-text">LitLens</div>
-        <div class="logo-sub">Local literature review</div>
-        <div class="server-status" id="server-status">Connecting to server…</div>
+      <div class="logo-text">LitLens</div>
+      <div class="sidebar-header-actions">
+        <button type="button" class="icon-btn sidebar-map-btn" id="sidebar-methods-map-btn" title="Methods map" aria-label="Methods map" aria-pressed="false">
+          <svg class="icon-svg" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+            <rect x="1" y="1" width="6" height="6" rx="1"></rect>
+            <rect x="9" y="1" width="6" height="6" rx="1"></rect>
+            <rect x="1" y="9" width="6" height="6" rx="1"></rect>
+            <rect x="9" y="9" width="6" height="6" rx="1"></rect>
+          </svg>
+        </button>
+        <button type="button" class="icon-btn" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme">◐</button>
       </div>
-      <button class="icon-btn" id="theme-toggle" title="Toggle theme">◐</button>
     </div>
-    <div class="search-wrap">
-      <div class="search-input-wrap">
-        <input class="search-input" id="search-input" type="search" placeholder="Search articles…" autocomplete="off">
-      </div>
+    <span id="server-status" class="sr-only" aria-live="polite">Connecting to server…</span>
+    <div class="sidebar-library-head">
+      <p class="sidebar-library-stats" id="sidebar-library-stats"></p>
+      <label class="sidebar-hide-checked">
+        <input type="checkbox" id="hide-checked-articles">
+        <span>Hide processed articles</span>
+      </label>
     </div>
     <div class="tag-filter-section" id="tag-filter-section" style="display:none">
       <div class="tag-filter-label">Filter by tag</div>
@@ -42,17 +51,27 @@
     </div>
     <div class="article-list" id="article-list"></div>
     <div class="sidebar-footer">
-      <button class="btn-sm btn-primary" id="add-article-btn">+ Article</button>
-      <button class="btn-sm btn-ghost" id="import-html-btn" title="Import .html from disk">HTML</button>
-      <button class="btn-sm btn-ghost" id="export-meta-csv-sidebar" title="Export META CSV">CSV</button>
+      <div class="sidebar-footer-actions">
+        <div class="sidebar-add-wrap">
+          <button type="button" class="sidebar-btn-add" id="sidebar-add-btn" title="Add article" aria-expanded="false" aria-haspopup="true">+</button>
+          <div class="sidebar-add-menu" id="sidebar-add-menu" role="menu">
+            <button type="button" class="sidebar-add-menu-item" role="menuitem" data-add-action="text">Text or URL…</button>
+            <button type="button" class="sidebar-add-menu-item" role="menuitem" data-add-action="html">Paste HTML…</button>
+            <button type="button" class="sidebar-add-menu-item" role="menuitem" data-add-action="file">Import .html file…</button>
+          </div>
+        </div>
+        <button type="button" class="sidebar-btn-csv btn-sm btn-ghost" id="export-meta-csv-sidebar" title="Export META CSV">CSV</button>
+      </div>
       <input type="file" id="import-html-file" accept=".html,.htm,text/html" hidden>
     </div>
   </aside>
 
   <main id="main">
     <div id="topbar">
+      <button type="button" class="btn-sm btn-ghost topbar-method-back" id="topbar-method-back" hidden title="Return to method card">← Method</button>
       <span class="topbar-title" id="topbar-title">Select an article</span>
       <a class="btn-sm btn-ghost" id="source-link" href="#" target="_blank" rel="noopener" style="display:none;font-size:11px">Source ↗</a>
+      <span class="topbar-paragraph-progress" id="topbar-paragraph-progress" hidden title="Methods paragraphs marked read"></span>
       <button class="icon-btn" id="delete-btn" title="Delete article" style="display:none">✕</button>
     </div>
     <div id="article-view">
@@ -63,6 +82,56 @@
         <button type="button" class="btn-add-article" id="empty-add-btn" style="margin-top:16px;max-width:220px">Add article</button>
       </div>
       <div class="article-body" id="article-body" style="display:none"></div>
+      <div id="methods-map-view" class="methods-map-view" style="display:none">
+        <div class="methods-map-nav" id="methods-map-nav">
+          <button type="button" class="btn-sm btn-ghost methods-map-nav-back" id="methods-map-back-article" title="Return to article">← Article</button>
+          <div class="methods-map-nav-tabs" role="tablist" aria-label="Methods views">
+            <button type="button" class="btn-sm btn-ghost methods-map-nav-tab" id="methods-map-show-grid" role="tab" aria-selected="true" aria-pressed="true">Map</button>
+            <button type="button" class="btn-sm btn-ghost methods-map-nav-tab" id="methods-map-show-catalog" role="tab" aria-selected="false" aria-pressed="false">Catalog</button>
+          </div>
+        </div>
+        <div id="methods-map-catalog-wrap" class="methods-map-catalog-wrap" style="display:none">
+          <p class="notes-label methods-map-catalog-title">Method catalog</p>
+          <p class="meta-hint methods-map-catalog-hint">Edit methods and triggers, then press ✓ to save. Suggest on Info uses this catalog.</p>
+          <div class="method-catalog-toolbar">
+            <span id="method-profiles-save-status" class="method-catalog-status"></span>
+            <button type="button" class="btn-sm btn-ghost" id="method-catalog-add-btn">+ Add method</button>
+            <button type="button" class="btn-sm btn-ghost" id="method-catalog-back-map" hidden>← Map</button>
+            <button type="button" id="method-catalog-save-btn" class="method-catalog-save-btn" title="Save catalog" disabled aria-label="Save catalog">✓</button>
+          </div>
+          <div id="method-catalog-profiles"></div>
+        </div>
+        <p class="methods-map-status" id="methods-map-status"></p>
+        <div id="methods-map-grid-wrap" class="methods-map-grid-wrap">
+          <button type="button" class="btn-sm btn-ghost methods-map-edit-catalog-btn" id="methods-map-edit-catalog-btn">Edit methods…</button>
+          <div id="methods-map-grid" class="methods-map-grid"></div>
+        </div>
+        <div id="methods-map-mentions" class="methods-map-mentions" style="display:none">
+          <div class="methods-map-mentions-head">
+            <button type="button" class="btn-sm btn-ghost" id="methods-map-mentions-back">← Map</button>
+            <h3 class="methods-map-mentions-title" id="methods-map-mentions-title"></h3>
+            <div class="methods-map-card-toolbar" id="methods-map-card-toolbar">
+              <button type="button" class="btn-sm btn-ghost" id="methods-map-copy-link" title="Copy [[method:…]] for Definition and other text fields">⎘ Link</button>
+              <button type="button" class="method-catalog-edit-btn" id="methods-map-card-edit" title="Edit method card">✎</button>
+              <button type="button" class="method-catalog-save-btn methods-map-card-save" id="methods-map-card-save" title="Save card" hidden aria-label="Save">✓</button>
+              <button type="button" class="btn-sm btn-ghost" id="methods-map-card-cancel" hidden>Cancel</button>
+              <span class="methods-map-card-save-status" id="methods-map-card-save-status"></span>
+            </div>
+          </div>
+          <div class="methods-map-mentions-layout">
+            <div class="methods-map-mentions-main">
+              <div id="methods-map-method-card" class="methods-map-method-card"></div>
+              <p class="methods-map-mentions-hint" id="methods-map-mentions-hint"></p>
+              <div id="methods-map-mentions-list" class="methods-map-mentions-list"></div>
+            </div>
+            <aside class="methods-map-chart-panel">
+              <p class="notes-label methods-map-chart-label">Library usage by year</p>
+              <p class="meta-hint methods-map-chart-hint">Articles with this method in Info (year from metadata).</p>
+              <div id="methods-map-method-chart" class="methods-map-method-chart"></div>
+            </aside>
+          </div>
+        </div>
+      </div>
     </div>
   </main>
 
@@ -138,15 +207,29 @@
       </div>
       <hr style="border:none;border-top:1px solid var(--color-divider);margin:14px 0">
       <p class="notes-label" style="margin-bottom:8px">Study metadata</p>
+      <div id="meta-suggest-toolbar" class="meta-suggest-toolbar">
+        <button type="button" class="btn-sm btn-ghost" id="meta-suggest-scan-btn">Suggest from text</button>
+        <button type="button" class="btn-sm btn-ghost meta-suggest-dismiss-all" id="meta-suggest-dismiss-all" title="Dismiss all suggestions for this article">Dismiss all</button>
+        <label class="meta-suggest-scope">
+          <input type="checkbox" id="meta-suggest-methods" checked>
+          Methods
+        </label>
+        <label class="meta-suggest-scope">
+          <input type="checkbox" id="meta-suggest-full">
+          Full article
+        </label>
+      </div>
+      <p class="meta-suggest-status" id="meta-suggest-status">Open an article, then scan. Species & tasks scan first; enable Methods for analysis methods (slow on long papers).</p>
       <div id="meta-structured-fields"></div>
       <button type="button" class="btn-sm btn-primary" id="export-meta-csv-btn" style="width:100%;margin-top:14px">Export all as CSV</button>
     </div>
     <div class="panel-content" id="tab-tags">
+      <p class="tags-library-stats notes-label" id="tags-library-stats"></p>
       <div class="article-tags-panel" id="article-tags-assign" style="display:none">
         <p class="notes-label">Tags on this article</p>
         <div id="article-tag-toggles"></div>
       </div>
-      <p class="notes-label">Manage tags</p>
+      <p class="notes-label" id="tags-manage-label">Manage tags</p>
       <p class="meta-hint" style="margin-top:0;margin-bottom:8px">Select text in the article, then <strong>+</strong> to create a tag (assigned to the open article).</p>
       <div id="tags-def-list"></div>
       <div class="kw-add-input" style="margin-top:8px">
@@ -170,7 +253,17 @@
     </div>
 
     <div class="panel-content" id="tab-settings">
+      <p class="notes-label">Term catalogs (Info autofill)</p>
+      <p class="meta-hint" style="margin-top:0;margin-bottom:8px">Canonical names and phrases that trigger suggestions on the Info tab. Methods: <strong>Methods map → Catalog</strong>.</p>
+      <div class="method-catalog-toolbar term-catalog-toolbar">
+        <span id="term-catalog-save-status" class="method-catalog-status"></span>
+        <button type="button" id="term-catalog-save-btn" class="method-catalog-save-btn" title="Save catalogs" disabled aria-label="Save">✓</button>
+      </div>
+      <div id="term-catalog-tabs" class="term-catalog-tabs"></div>
+      <div id="term-catalog-profiles"></div>
+      <hr style="border:none;border-top:1px solid var(--color-divider);margin:16px 0">
       <p class="notes-label">Highlight rules</p>
+      <p class="meta-hint" style="margin-top:0;margin-bottom:10px">Column links and forced highlights (Terms tab).</p>
       <div id="settings-column-links"></div>
     </div>
     <div class="panel-content" id="tab-search">
@@ -188,6 +281,10 @@
 <div id="ctx-menu">
   <div class="ctx-title">Add term to category</div>
   <div id="ctx-categories"></div>
+  <hr class="ctx-divider">
+  <div class="ctx-title">Passage citation</div>
+  <p class="ctx-hint">Select text in the article, then copy a link to paste into the method card.</p>
+  <div id="ctx-cite-actions"></div>
 </div>
 
 <div id="modal-overlay">
@@ -217,15 +314,40 @@
   </div>
 </div>
 
+
+<div id="method-evidence-overlay" class="method-evidence-overlay">
+  <div class="modal method-evidence-modal">
+    <div class="modal-title" id="method-evidence-title">Link method</div>
+    <p class="modal-sub">Select one or more passages from the article. Saved with this paper only (not in CSV).</p>
+    <div id="method-evidence-list" class="method-evidence-list"></div>
+    <div class="modal-actions method-evidence-actions">
+      <button type="button" class="btn-cancel" id="method-evidence-skip">Skip</button>
+      <button type="button" class="btn-cancel" id="method-evidence-cancel">Cancel</button>
+      <button type="button" class="btn-confirm" id="method-evidence-confirm">Link</button>
+    </div>
+  </div>
+</div>
+
 <script src="/shared/highlight.js"></script>
 <script src="/shared/column-links.js"></script>
 <script src="/shared/bookmarks.js"></script>
+<script src="/shared/paragraph-blocks.js"></script>
 <script src="/shared/article-extract.js"></script>
 <script src="/shared/section-detect.js"></script>
+<script src="/shared/method-profiles.js"></script>
+<script src="/shared/vocab-term-profiles.js"></script>
+<script src="/shared/method-links.js?v=20"></script>
+<script src="/shared/passage-links.js"></script>
+<script src="passage-cite-store.js"></script>
 <script src="/shared/metadata.js"></script>
 <script src="app.js"></script>
 <script src="structured-meta.js"></script>
 <script src="bookmarks-ui.js"></script>
+<script src="article-paragraph-read.js"></script>
+<script src="article-method-rail.js"></script>
+<script src="term-profiles-ui.js"></script>
 <script src="settings-ui.js"></script>
+<script src="method-profiles-ui.js"></script>
+<script src="methods-map.js"></script>
 </body>
 </html>

@@ -292,13 +292,18 @@
     return newSections.length > 0;
   }
 
-  async function autoDetectSectionsIfNeeded() {
+  async function autoDetectSectionsIfNeeded(opts = {}) {
+    const scrollToMethods = opts.scrollToMethods !== false;
     if (!getCurrentId() || !getBody()?.innerHTML) return;
-    if (hasAutoSectionBookmarks(bookmarks)) {
-      scrollToMethodsIfPresent();
+    if (
+      opts.skipDetect ||
+      bookmarks.length > 0 ||
+      hasAutoSectionBookmarks(bookmarks)
+    ) {
+      if (scrollToMethods) scrollToMethodsIfPresent();
       return;
     }
-    await detectSections({ silent: true, scrollToMethods: true });
+    await detectSections({ silent: true, scrollToMethods });
   }
 
   function init() {

@@ -14,6 +14,7 @@ const INFO_COLUMNS = [
   { key: "behavioralParadigms", label: "Behavioral paradigm", group: "study" },
   { key: "recordingMethods", label: "Recording methods", group: "study" },
   { key: "cellTypes", label: "Cell type", group: "study" },
+  { key: "software", label: "Software", group: "study" },
   { key: "cellFilterCriterion", label: "Cell filter criterion", group: "study" },
   { key: "methods", label: "Methods (analysis)", group: "study" },
 ];
@@ -80,6 +81,79 @@ function filterTermsForArticle(termsDoc, article) {
   };
 }
 
+/** True when study metadata, bookmarks, or a prior scan was saved for this article. */
+function articleHasSavedStudyMetadata(article) {
+  if (!article) return false;
+  const s = article.structured || {};
+  const arrayKeys = [
+    "species",
+    "behavioralParadigms",
+    "recordingMethods",
+    "cellTypes",
+    "software",
+    "methods",
+  ];
+  for (const key of arrayKeys) {
+    if (Array.isArray(s[key]) && s[key].length) return true;
+  }
+  if (
+    Array.isArray(s.brainRegions) &&
+    s.brainRegions.some((r) => String(r?.label || "").trim())
+  ) {
+    return true;
+  }
+  if (String(article.nAnimals || s.nAnimals || "").trim()) return true;
+  if (String(article.cellFilterCriterion || s.cellFilterCriterion || "").trim()) {
+    return true;
+  }
+  const evidence = article.methodEvidence;
+  if (evidence && typeof evidence === "object") {
+    for (const entries of Object.values(evidence)) {
+      if (Array.isArray(entries) && entries.length) return true;
+    }
+  }
+  if (Array.isArray(article.readParagraphKeys) && article.readParagraphKeys.length) {
+    return true;
+  }
+  if ((article.methodsParagraphTotal || 0) > 0) return true;
+  if (
+    Array.isArray(article.methodSuggestionsDismissed) &&
+    article.methodSuggestionsDismissed.length
+  ) {
+    return true;
+  }
+  if (
+    Array.isArray(article.methodSuggestionsDismissedHits) &&
+    article.methodSuggestionsDismissedHits.length
+  ) {
+    return true;
+  }
+  const aliases = article.foundTermAliases;
+  if (aliases && typeof aliases === "object" && Object.keys(aliases).length) {
+    return true;
+  }
+  if (Array.isArray(article.bookmarks) && article.bookmarks.length) return true;
+  return false;
+}
+
+/** Methods workflow not started — skip Methods scan, rail, and Read marks on open. */
+function articleMethodsAreUnset(article) {
+  if (!article) return true;
+  if (Array.isArray(article.structured?.methods) && article.structured.methods.length) {
+    return false;
+  }
+  const evidence = article.methodEvidence;
+  if (evidence && typeof evidence === "object") {
+    for (const entries of Object.values(evidence)) {
+      if (Array.isArray(entries) && entries.length) return false;
+    }
+  }
+  if (Array.isArray(article.readParagraphKeys) && article.readParagraphKeys.length) {
+    return false;
+  }
+  return true;
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     INFO_COLUMNS,
@@ -90,6 +164,8 @@ if (typeof module !== "undefined" && module.exports) {
     isCategoryHighlightsHidden,
     reconcileHighlightForceShown,
     filterTermsForArticle,
+    articleHasSavedStudyMetadata,
+    articleMethodsAreUnset,
   };
 }
 
@@ -103,5 +179,7 @@ if (typeof window !== "undefined") {
     isCategoryHighlightsHidden,
     reconcileHighlightForceShown,
     filterTermsForArticle,
+    articleHasSavedStudyMetadata,
+    articleMethodsAreUnset,
   };
 }

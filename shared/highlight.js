@@ -55,6 +55,13 @@ function collectTextNodes(root, forCategoryId) {
       if (existingMark && existingMark.dataset.categoryId === forCategoryId) {
         return NodeFilter.FILTER_REJECT;
       }
+      if (
+        p.closest?.(
+          "mark.litlens-method-evidence-pin, .litlens-method-evidence-pin-block, mark.litlens-method-linked"
+        )
+      ) {
+        return NodeFilter.FILTER_REJECT;
+      }
       return NodeFilter.FILTER_ACCEPT;
     },
   });
@@ -127,6 +134,93 @@ function removeHighlights(root) {
   });
 }
 
+function collectTextNodesForMethodAssoc(root) {
+  const nodes = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const p = node.parentElement;
+      if (!p || !node.nodeValue?.trim()) return NodeFilter.FILTER_REJECT;
+      if (SKIP_PARENT.test(p.tagName)) return NodeFilter.FILTER_REJECT;
+      if (p.closest?.("[data-litlens-ignore]")) return NodeFilter.FILTER_REJECT;
+      if (
+        p.closest?.(
+          "mark.kw-highlight, mark.method-assoc-highlight, mark.litlens-method-evidence-pin, .litlens-method-evidence-pin-block, mark.litlens-method-linked"
+        )
+      ) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  return nodes;
+}
+
+function wrapMethodAssocMatch(textNode, start, end, meta) {
+  const text = textNode.nodeValue;
+  const before = text.slice(0, start);
+  const match = text.slice(start, end);
+  const after = text.slice(end);
+  const mark = document.createElement("mark");
+  mark.className = "method-assoc-highlight";
+  mark.dataset.methodLabels = meta.methods.join("|");
+  mark.dataset.pendingMethods = meta.pendingMethods.join("|");
+  const pending = meta.pendingMethods.join(", ");
+  const all = meta.methods.join(", ");
+  mark.title =
+    pending.length < all.length
+      ? `Methods: ${all}\nNot marked yet: ${pending}`
+      : `Methods: ${all}`;
+  mark.textContent = match;
+
+  const frag = document.createDocumentFragment();
+  if (before) frag.appendChild(document.createTextNode(before));
+  frag.appendChild(mark);
+  if (after) frag.appendChild(document.createTextNode(after));
+  textNode.parentNode.replaceChild(frag, textNode);
+  return mark;
+}
+
+function removeMethodAssociationHighlights(root) {
+  if (!root) return;
+  root.querySelectorAll("mark.method-assoc-highlight").forEach((mark) => {
+    const parent = mark.parentNode;
+    if (!parent) return;
+    parent.replaceChild(document.createTextNode(mark.textContent), mark);
+    parent.normalize();
+  });
+}
+
+function applyMethodAssociationHighlights(root, patterns) {
+  if (!root) return;
+  removeMethodAssociationHighlights(root);
+  if (!patterns?.length) return;
+
+  for (const meta of patterns) {
+    const buildRe = window.LitLensMethodProfiles?.buildTermRegExp;
+    const re = buildRe
+      ? buildRe(meta.pattern, "gi")
+      : new RegExp(`\\b${escapeRegex(meta.pattern)}\\b`, "gi");
+    if (!re) continue;
+    let iterations = 0;
+    const maxIter = 2000;
+    while (iterations++ < maxIter) {
+      const nodes = collectTextNodesForMethodAssoc(root);
+      let matched = false;
+      for (const textNode of nodes) {
+        const text = textNode.nodeValue;
+        re.lastIndex = 0;
+        const m = re.exec(text);
+        if (!m) continue;
+        wrapMethodAssocMatch(textNode, m.index, m.index + m[0].length, meta);
+        matched = true;
+        break;
+      }
+      if (!matched) break;
+    }
+  }
+}
+
 function extractReadableText(root) {
   const clone = root.cloneNode(true);
   clone.querySelectorAll("script,style,nav,header,footer,aside").forEach((el) => el.remove());
@@ -138,6 +232,8 @@ if (typeof module !== "undefined" && module.exports) {
     flattenTerms,
     applyHighlights,
     removeHighlights,
+    applyMethodAssociationHighlights,
+    removeMethodAssociationHighlights,
     extractReadableText,
     escapeRegex,
   };
@@ -148,6 +244,8 @@ if (typeof window !== "undefined") {
     flattenTerms,
     applyHighlights,
     removeHighlights,
+    applyMethodAssociationHighlights,
+    removeMethodAssociationHighlights,
     extractReadableText,
     escapeRegex,
   };

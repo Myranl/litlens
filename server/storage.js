@@ -6,6 +6,7 @@ const {
   TERMS_FILE,
   TAGS_FILE,
   VOCAB_FILE,
+  PASSAGE_CITATIONS_FILE,
   DEFAULT_TERMS,
   DEFAULT_TAGS,
   VOCAB_DEFAULTS,
@@ -105,6 +106,7 @@ const EMPTY_STRUCTURED = () => ({
   behavioralParadigms: [],
   recordingMethods: [],
   cellTypes: [],
+  software: [],
   methods: [],
   nAnimals: "",
 });
@@ -116,6 +118,7 @@ function normalizeArticleMeta(meta) {
   if (meta.behavioralParadigms) structured.behavioralParadigms = meta.behavioralParadigms;
   if (meta.recordingMethods) structured.recordingMethods = meta.recordingMethods;
   if (meta.cellTypes) structured.cellTypes = meta.cellTypes;
+  if (meta.software) structured.software = meta.software;
   if (meta.methods) structured.methods = meta.methods;
   if (meta.nAnimals != null) structured.nAnimals = meta.nAnimals;
   if (meta.cellFilterCriterion != null) {
@@ -141,6 +144,33 @@ function normalizeArticleMeta(meta) {
     highlightForceShown: Array.isArray(meta.highlightForceShown)
       ? meta.highlightForceShown
       : [],
+    methodSuggestionsDismissed: Array.isArray(meta.methodSuggestionsDismissed)
+      ? [...meta.methodSuggestionsDismissed]
+      : [],
+    methodSuggestionsDismissedHits: Array.isArray(
+      meta.methodSuggestionsDismissedHits
+    )
+      ? [...meta.methodSuggestionsDismissedHits]
+      : [],
+    methodEvidence:
+      meta.methodEvidence && typeof meta.methodEvidence === "object"
+        ? { ...meta.methodEvidence }
+        : {},
+    foundTermAliases:
+      meta.foundTermAliases && typeof meta.foundTermAliases === "object"
+        ? JSON.parse(JSON.stringify(meta.foundTermAliases))
+        : {},
+    readParagraphOffsets: Array.isArray(meta.readParagraphOffsets)
+      ? [...meta.readParagraphOffsets].filter((n) => typeof n === "number" && n >= 0)
+      : [],
+    readParagraphKeys: Array.isArray(meta.readParagraphKeys)
+      ? [...meta.readParagraphKeys].filter((k) => typeof k === "string" && k.trim())
+      : [],
+    methodsParagraphTotal:
+      typeof meta.methodsParagraphTotal === "number" && meta.methodsParagraphTotal >= 0
+        ? meta.methodsParagraphTotal
+        : 0,
+    status: meta.status === "checked" ? "checked" : "new",
   };
 }
 
@@ -185,7 +215,7 @@ function articleToCsvRow(meta) {
     methods_firing: joinList(s.methods),
     paper_id: meta.id || "",
     "recording modality": joinList(s.recordingMethods),
-    software: "",
+    software: joinList(s.software),
     species: joinList(s.species),
     year: meta.year || "",
   };
@@ -310,13 +340,95 @@ function saveTags(tagsDoc) {
   return tagsDoc;
 }
 
+function stripCombinationTriggers(vocab) {
+  if (!vocab || typeof vocab !== "object") return { vocab, changed: false };
+  let changed = false;
+  const catalogs = [
+    vocab.methodCatalog,
+    vocab.profiles?.methods,
+  ].filter(Array.isArray);
+  for (const list of catalogs) {
+    for (const p of list) {
+      if (!p?.triggers) continue;
+      if (Array.isArray(p.triggers.combination) && p.triggers.combination.length) {
+        p.triggers.combination = [];
+        changed = true;
+      }
+    }
+  }
+  return { vocab, changed };
+}
+
 function getVocab() {
-  return readJson(VOCAB_FILE, VOCAB_DEFAULTS);
+  const vocab = readJson(VOCAB_FILE, VOCAB_DEFAULTS);
+  const { vocab: stripped, changed } = stripCombinationTriggers(vocab);
+  if (changed) writeJson(VOCAB_FILE, stripped);
+  return stripped;
 }
 
 function saveVocab(vocab) {
-  writeJson(VOCAB_FILE, vocab);
-  return vocab;
+  const { vocab: stripped } = stripCombinationTriggers(vocab);
+  writeJson(VOCAB_FILE, stripped);
+  return stripped;
+}
+
+function loadPassageCitations() {
+  const raw = readJson(PASSAGE_CITATIONS_FILE, {});
+  return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+}
+
+function savePassageCitations(citations) {
+  writeJson(PASSAGE_CITATIONS_FILE, citations);
+  return citations;
+}
+
+function passageCitationFingerprint(entry) {
+  const q = String(entry.quote || "").slice(0, 120);
+  return [
+    entry.articleId,
+    entry.offset,
+    entry.length,
+    q,
+  ].join("\u0001");
+}
+
+function generatePassageCiteId(existing) {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  for (let attempt = 0; attempt < 40; attempt++) {
+    let id = "";
+    for (let i = 0; i < 6; i++) {
+      id += chars[Math.floor(Math.random() * chars.length)];
+    }
+    if (!existing[id]) return id;
+  }
+  return `c${Date.now().toString(36).slice(-5)}`;
+}
+
+function registerPassageCitation(entry) {
+  const store = loadPassageCitations();
+  const normalized = {
+    articleId: String(entry.articleId || "").trim(),
+    offset: Math.max(0, parseInt(entry.offset, 10) || 0),
+    length: Math.max(1, parseInt(entry.length, 10) || 1),
+    quote: String(entry.quote || ""),
+    label: String(entry.label || "").trim(),
+    createdAt: entry.createdAt || Date.now(),
+  };
+  if (!normalized.articleId) {
+    throw new Error("articleId required");
+  }
+
+  const fp = passageCitationFingerprint(normalized);
+  for (const [id, stored] of Object.entries(store)) {
+    if (passageCitationFingerprint(stored) === fp) {
+      return { id, entry: stored, created: false };
+    }
+  }
+
+  const id = generatePassageCiteId(store);
+  store[id] = normalized;
+  savePassageCitations(store);
+  return { id, entry: normalized, created: true };
 }
 
 function searchArticles(query, limit = 50) {
@@ -359,6 +471,9 @@ module.exports = {
   saveTags,
   getVocab,
   saveVocab,
+  loadPassageCitations,
+  savePassageCitations,
+  registerPassageCitation,
   exportMetaCsv,
   searchArticles,
 };
