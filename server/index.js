@@ -114,6 +114,7 @@ app.patch("/api/articles/:id", (req, res) => {
     methodSuggestionsDismissedHits,
     methodAbsentLabels,
     methodEvidence,
+    methodNotes,
     foundTermAliases,
     readParagraphOffsets,
     readParagraphKeys,
@@ -145,6 +146,9 @@ app.patch("/api/articles/:id", (req, res) => {
   }
   if (methodEvidence !== undefined && typeof methodEvidence === "object") {
     patch.methodEvidence = methodEvidence;
+  }
+  if (methodNotes !== undefined && typeof methodNotes === "object") {
+    patch.methodNotes = methodNotes;
   }
   if (foundTermAliases !== undefined && typeof foundTermAliases === "object") {
     patch.foundTermAliases = foundTermAliases;

@@ -111,6 +111,18 @@ const EMPTY_STRUCTURED = () => ({
   nAnimals: "",
 });
 
+/** Per-article notes for linked methods (sources, context) keyed by method label. */
+function normalizeMethodNotes(raw) {
+  if (!raw || typeof raw !== "object") return {};
+  const out = {};
+  for (const [label, text] of Object.entries(raw)) {
+    const key = String(label || "").trim();
+    const val = String(text || "").trim();
+    if (key && val) out[key] = val;
+  }
+  return out;
+}
+
 function normalizeArticleMeta(meta) {
   const structured = { ...EMPTY_STRUCTURED(), ...(meta.structured || {}) };
   if (meta.species) structured.species = meta.species;
@@ -158,6 +170,10 @@ function normalizeArticleMeta(meta) {
     methodEvidence:
       meta.methodEvidence && typeof meta.methodEvidence === "object"
         ? { ...meta.methodEvidence }
+        : {},
+    methodNotes:
+      meta.methodNotes && typeof meta.methodNotes === "object"
+        ? normalizeMethodNotes(meta.methodNotes)
         : {},
     foundTermAliases:
       meta.foundTermAliases && typeof meta.foundTermAliases === "object"

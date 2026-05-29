@@ -187,6 +187,7 @@
             length: ev.length,
             matchedTerm: ev.matchedTerm,
             matchType: ev.matchType,
+            comment: String(ev.comment || "").trim(),
           });
         }
       } else if (articleHasMethod(article, methodLabel)) {
@@ -1228,7 +1229,7 @@
         hintEl.textContent = libraryScanHintText(libraryScanCache.data);
       } else if (!isLibrary && selectedMethodLabel) {
         hintEl.textContent =
-          "Saved passages you confirmed on the Info tab. ⎘ copy cite link · ✕ remove. Switch to Library scan for new matches.";
+          "Saved passages from Info. Add a comment per citation (source / prior work). ⎘ cite · ✕ remove.";
       }
     }
 
@@ -1368,6 +1369,7 @@
       matchedTerm: hit.matchedTerm || "",
       matchType: hit.matchType || "direct",
       sentenceBounds: true,
+      comment: String(hit.comment || "").trim(),
     };
     if (
       !list.some(
@@ -1416,7 +1418,7 @@
     );
     if (hintEl) {
       hintEl.textContent = passageCount
-        ? `${passageCount} saved passage${passageCount === 1 ? "" : "s"} in ${groups.length} article${groups.length === 1 ? "" : "s"}. Click to open · right-click excerpt for cite link.`
+        ? `${passageCount} saved passage${passageCount === 1 ? "" : "s"} in ${groups.length} article${groups.length === 1 ? "" : "s"}. Click excerpt to open · comment saves automatically.`
         : "No passages saved yet. Link this method on the Info tab to add excerpts.";
     }
     renderMentionsList(groups);
@@ -1659,7 +1661,7 @@
     return { passages, articles };
   }
 
-  function formatCitationExportLine(articleMeta, excerpt) {
+  function formatCitationExportLine(articleMeta, excerpt, comment) {
     const authors = String(articleMeta?.authors || "").trim() || "[Author?]";
     const year =
       String(articleMeta?.year || articleMeta?.structured?.year || "").trim() ||
@@ -1667,7 +1669,12 @@
     const quote = String(excerpt || "")
       .replace(/\s+/g, " ")
       .trim();
-    return quote ? `${authors}, ${year} - ${quote}` : `${authors}, ${year}`;
+    let line = quote ? `${authors}, ${year} - ${quote}` : `${authors}, ${year}`;
+    const note = String(comment || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (note) line += `\n  → ${note}`;
+    return line;
   }
 
   function citationExportFilename(methodLabel) {
@@ -1718,7 +1725,7 @@
       for (const p of g.passages || []) {
         const excerpt = String(p.excerpt || "").trim();
         if (!excerpt) continue;
-        saved.push(formatCitationExportLine(meta, excerpt));
+        saved.push(formatCitationExportLine(meta, excerpt, p.comment));
       }
     }
 
@@ -1852,6 +1859,7 @@
         matchedTerm: e.matchedTerm,
         matchType: e.matchType,
         excerpt: String(e.excerpt || "").trim(),
+        comment: String(e.comment || "").trim(),
       }));
     if (!rows.length) return [];
 
@@ -1859,6 +1867,7 @@
       offset: e.offset,
       length: e.length,
       excerpt: e.excerpt,
+      comment: e.comment || "",
       hits: [
         {
           offset: e.offset,
@@ -1889,10 +1898,15 @@
           ? MPapi.sentenceExcerptFromPlain(hay, p.offset, p.length, 420)
           : "") ||
         "…";
+      const comment =
+        parts.find((e) => e.offset === p.offset && e.comment)?.comment ||
+        parts.find((e) => e.comment)?.comment ||
+        "";
       return {
         offset: p.offset,
         length: p.length,
         excerpt,
+        comment,
         hits: parts.map((e) => ({
           offset: e.offset,
           matchedTerm: e.matchedTerm,
@@ -1949,6 +1963,313 @@
       }
     }
     return groups;
+  }
+
+  function findEvidenceIndexForPassage(list, passage) {
+    if (!Array.isArray(list) || passage?.offset == null) return -1;
+    let idx = list.findIndex(
+      (e) =>
+        e.offset === passage.offset &&
+        Math.max(1, e.length || 1) === Math.max(1, passage.length || 1)
+    );
+    if (idx >= 0) return idx;
+    return list.findIndex((e) => evidenceOverlapsPassage(e, passage));
+  }
+
+  const passageCommentSaveTimers = new Map();
+
+  function schedulePassageCommentSave(articleId, passage, comment) {
+    const key = `${articleId}:${passage.offset}:${passage.length || 0}`;
+    clearTimeout(passageCommentSaveTimers.get(key));
+    passageCommentSaveTimers.set(
+      key,
+      window.setTimeout(() => {
+        passageCommentSaveTimers.delete(key);
+        void savePassageComment(articleId, passage, comment);
+      }, 500)
+    );
+  }
+
+  async function savePassageComment(articleId, passage, comment) {
+    const label = selectedMethodLabel;
+    if (!articleId || !label || passage?.offset == null) return;
+    let article = articlesById.get(articleId);
+    if (!article) {
+      const res = await fetch(`${API}/articles/${articleId}`);
+      if (!res.ok) return;
+      article = await res.json();
+      mergeArticleIntoLibraryState(article);
+    }
+    const me = {
+      ...(article.methodEvidence && typeof article.methodEvidence === "object"
+        ? article.methodEvidence
+        : {}),
+    };
+    const storageKey = methodEvidenceStorageKey(me, label);
+    if (!storageKey) return;
+    const list = Array.isArray(me[storageKey]) ? [...me[storageKey]] : [];
+    const idx = findEvidenceIndexForPassage(list, passage);
+    if (idx < 0) return;
+    const trimmed = String(comment || "").trim();
+    if (String(list[idx].comment || "").trim() === trimmed) return;
+    list[idx] = { ...list[idx], comment: trimmed };
+    me[storageKey] = list;
+    try {
+      const updated = await patchArticleMeta(articleId, { methodEvidence: me });
+      mergeArticleIntoLibraryState(updated);
+      setCardSaveStatus(trimmed ? "Comment saved" : "Comment cleared");
+      window.setTimeout(() => setCardSaveStatus(""), 2000);
+    } catch (e) {
+      setCardSaveStatus(e.message || "Could not save comment", true);
+    }
+  }
+
+  const PASSAGE_COMMENT_URL_RE = /\bhttps?:\/\/[^\s<>"')\]]+/gi;
+
+  function appendPlainUrlsToElement(parent, text) {
+    const hay = String(text || "");
+    if (!hay) return;
+    let last = 0;
+    PASSAGE_COMMENT_URL_RE.lastIndex = 0;
+    let match;
+    while ((match = PASSAGE_COMMENT_URL_RE.exec(hay)) !== null) {
+      let url = match[0];
+      while (/[.,;:!?)\]]$/.test(url)) url = url.slice(0, -1);
+      if (!url) continue;
+      if (match.index > last) {
+        parent.appendChild(document.createTextNode(hay.slice(last, match.index)));
+      }
+      const a = document.createElement("a");
+      a.href = url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.className = "methods-map-passage-comment-link";
+      a.textContent = url;
+      a.addEventListener("click", (e) => e.stopPropagation());
+      parent.appendChild(a);
+      last = match.index + match[0].length;
+    }
+    if (last < hay.length) {
+      parent.appendChild(document.createTextNode(hay.slice(last)));
+    }
+  }
+
+  function linkifyBareUrlsInElement(root) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    let n;
+    while ((n = walker.nextNode())) nodes.push(n);
+    for (const node of nodes) {
+      const hay = node.textContent || "";
+      PASSAGE_COMMENT_URL_RE.lastIndex = 0;
+      if (!PASSAGE_COMMENT_URL_RE.test(hay)) continue;
+      const wrap = document.createElement("span");
+      appendPlainUrlsToElement(wrap, hay);
+      node.parentNode?.replaceChild(wrap, node);
+    }
+  }
+
+  function renderPassageCommentRead(el, text, articleId) {
+    el.replaceChildren();
+    const val = String(text || "").trim();
+    if (!val) {
+      el.hidden = true;
+      return;
+    }
+    el.hidden = false;
+    const PL = window.LitLensPassageLinks;
+    const links = window.LitLensMethodLinks;
+    const IF = window.LitLensInlineFormat;
+    const norm = links?.normalizeDocFieldText
+      ? links.normalizeDocFieldText(val)
+      : val;
+    const hasCite = PL?.hasCiteMarkup?.(norm);
+    const hasMethodLink =
+      links?.hasMethodLinkMarkup?.(norm) || /\[\[method:/i.test(norm);
+    const hasFmt = IF?.hasInlineFormat?.(norm);
+    const article = articlesById.get(articleId);
+    const articlesMap = new Map();
+    if (article?.id) articlesMap.set(article.id, article);
+
+    if (
+      links?.renderMethodDocFragment &&
+      (hasCite || hasMethodLink || hasFmt)
+    ) {
+      el.appendChild(
+        links.renderMethodDocFragment(norm, {
+          articlesById: articlesMap,
+          citeStore: passageCiteStore(),
+          vocab: vocabCache,
+          onCiteClick: openCitation,
+          onMethodClick: (label) => void openMethodCard(label),
+        })
+      );
+      linkifyBareUrlsInElement(el);
+      return;
+    }
+    if (hasFmt && IF?.appendFormattedText) {
+      IF.appendFormattedText(el, val);
+      linkifyBareUrlsInElement(el);
+      return;
+    }
+    appendPlainUrlsToElement(el, val);
+  }
+
+  function appendTextToPassageCommentInput(ta, snippet) {
+    const text = String(snippet || "");
+    if (!text || !ta) return;
+    const start = ta.selectionStart ?? ta.value.length;
+    const end = ta.selectionEnd ?? start;
+    const before = ta.value.slice(0, start);
+    const after = ta.value.slice(end);
+    const needsSpace =
+      before.length > 0 && !/[\s\n]$/.test(before) && !/^[\s,;]/.test(text);
+    const insert = (needsSpace ? " " : "") + text;
+    ta.value = before + insert + after;
+    const pos = before.length + insert.length;
+    ta.selectionStart = ta.selectionEnd = pos;
+    ta.focus();
+  }
+
+  function appendPassageCommentEditor(rowEl, articleId, passage, mode) {
+    const block = document.createElement("div");
+    block.className = "methods-map-passage-comment";
+
+    const summaryRow = document.createElement("div");
+    summaryRow.className = "methods-map-passage-comment-summary";
+
+    const preview = document.createElement("div");
+    preview.className = "methods-map-passage-comment-read";
+    const initialComment = String(passage.comment || "").trim();
+    if (initialComment) {
+      renderPassageCommentRead(preview, initialComment, articleId);
+    } else {
+      preview.hidden = true;
+      summaryRow.classList.add("methods-map-passage-comment-summary--empty");
+    }
+
+    const toggleBtn = document.createElement("button");
+    toggleBtn.type = "button";
+    toggleBtn.className =
+      "btn-sm btn-ghost methods-map-passage-comment-toggle";
+    toggleBtn.textContent = initialComment ? "Edit comment" : "Comment";
+    toggleBtn.title = initialComment
+      ? "Edit comment on this citation"
+      : "Add a comment (source, prior work, link)";
+
+    const editorWrap = document.createElement("div");
+    editorWrap.className = "methods-map-passage-comment-editor";
+    editorWrap.hidden = true;
+
+    const ta = document.createElement("textarea");
+    ta.className = "form-input methods-map-passage-comment-input";
+    ta.rows = 2;
+    ta.value = passage.comment || "";
+    ta.placeholder =
+      "Comment on this citation — prior work, external source, how it relates…";
+
+    const tools = document.createElement("div");
+    tools.className = "methods-map-passage-comment-tools";
+
+    const urlInp = document.createElement("input");
+    urlInp.type = "url";
+    urlInp.className = "form-input methods-map-passage-comment-url";
+    urlInp.placeholder = "https://…";
+
+    const urlBtn = document.createElement("button");
+    urlBtn.type = "button";
+    urlBtn.className = "btn-sm btn-ghost";
+    urlBtn.textContent = "+ URL";
+    urlBtn.title = "Append external link to this comment";
+    urlBtn.addEventListener("click", () => {
+      let url = urlInp.value.trim();
+      if (!url) return;
+      if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+      const line = ta.value.trim() ? `\nSource: ${url}` : `Source: ${url}`;
+      appendTextToPassageCommentInput(ta, line);
+      urlInp.value = "";
+      if (mode === "saved") {
+        schedulePassageCommentSave(articleId, passage, ta.value);
+      }
+    });
+
+    const citeBtn = document.createElement("button");
+    citeBtn.type = "button";
+    citeBtn.className = "btn-sm btn-ghost";
+    citeBtn.textContent = "⎘ Cite";
+    citeBtn.title =
+      "Copy [[cite:…]] for this passage — paste into comment or method card";
+    citeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      citeBtn.disabled = true;
+      void copyPassageCiteLink(
+        articleId,
+        {
+          offset: passage.offset,
+          length: passage.length,
+          excerpt: passage.excerpt,
+          quote: passage.excerpt,
+        },
+        { quiet: false }
+      ).finally(() => {
+        citeBtn.disabled = false;
+      });
+    });
+
+    function syncSummaryFromInput() {
+      const val = String(ta.value || "").trim();
+      passage.comment = val;
+      if (val) {
+        renderPassageCommentRead(preview, val, articleId);
+        summaryRow.classList.remove(
+          "methods-map-passage-comment-summary--empty"
+        );
+      } else {
+        preview.replaceChildren();
+        preview.hidden = true;
+        summaryRow.classList.add("methods-map-passage-comment-summary--empty");
+      }
+      if (!editorWrap.hidden) return;
+      toggleBtn.textContent = val ? "Edit comment" : "Comment";
+    }
+
+    function setEditorOpen(open) {
+      editorWrap.hidden = !open;
+      toggleBtn.textContent = open
+        ? "Hide"
+        : String(ta.value || "").trim()
+          ? "Edit comment"
+          : "Comment";
+      toggleBtn.title = open
+        ? "Close comment editor"
+        : String(ta.value || "").trim()
+          ? "Edit comment on this citation"
+          : "Add a comment (source, prior work, link)";
+      if (open) {
+        ta.focus();
+      } else {
+        syncSummaryFromInput();
+      }
+    }
+
+    toggleBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setEditorOpen(editorWrap.hidden);
+    });
+
+    if (mode === "saved") {
+      ta.addEventListener("input", () => {
+        schedulePassageCommentSave(articleId, passage, ta.value);
+        if (!editorWrap.hidden) syncSummaryFromInput();
+      });
+    }
+
+    tools.append(citeBtn, urlInp, urlBtn);
+    editorWrap.append(ta, tools);
+    summaryRow.append(preview, toggleBtn);
+    block.append(summaryRow, editorWrap);
+    rowEl.appendChild(block);
+    return ta;
   }
 
   /**
@@ -2063,7 +2384,11 @@
             };
 
       const rowEl = document.createElement("div");
-      rowEl.className = "methods-map-library-hit-row";
+      rowEl.className =
+        "methods-map-library-hit-row methods-map-library-hit-row--stacked";
+
+      const mainRow = document.createElement("div");
+      mainRow.className = "methods-map-library-hit-main";
 
       const quoteBtn = document.createElement("button");
       quoteBtn.type = "button";
@@ -2089,7 +2414,7 @@
         quote: excerpt,
       };
 
-      rowEl.appendChild(quoteBtn);
+      mainRow.appendChild(quoteBtn);
 
       if (mode === "library") {
         const actions = document.createElement("div");
@@ -2103,7 +2428,14 @@
         acceptBtn.textContent = "✓";
         acceptBtn.addEventListener("click", () => {
           acceptBtn.disabled = true;
-          void acceptLibraryScanHit(art.articleId, hit).catch((e) => {
+          const commentTa = rowEl.querySelector(
+            ".methods-map-passage-comment-input"
+          );
+          const hitWithComment = {
+            ...hit,
+            comment: commentTa?.value?.trim() || "",
+          };
+          void acceptLibraryScanHit(art.articleId, hitWithComment).catch((e) => {
             acceptBtn.disabled = false;
             setCardSaveStatus(e.message || "Save failed", true);
           });
@@ -2128,7 +2460,7 @@
           createPassageCiteCopyButton(art.articleId, citePassage),
           dismissBtn
         );
-        rowEl.appendChild(actions);
+        mainRow.appendChild(actions);
       } else if (mode === "saved") {
         const actions = document.createElement("div");
         actions.className = "methods-map-library-hit-actions";
@@ -2151,8 +2483,20 @@
           createPassageCiteCopyButton(art.articleId, citePassage),
           removeBtn
         );
-        rowEl.appendChild(actions);
+        mainRow.appendChild(actions);
       }
+
+      rowEl.appendChild(mainRow);
+      const passageRef =
+        mode === "library"
+          ? {
+              offset: hit.offset,
+              length: hit.length,
+              excerpt,
+              comment: "",
+            }
+          : row;
+      appendPassageCommentEditor(rowEl, art.articleId, passageRef, mode);
 
       hitsWrap.appendChild(rowEl);
     }
@@ -2388,7 +2732,7 @@
       );
       if (hintEl) {
         hintEl.textContent = passageCount
-          ? `${passageCount} saved passage${passageCount === 1 ? "" : "s"} in ${groups.length} article${groups.length === 1 ? "" : "s"}. Click to open · right-click excerpt for cite link.`
+          ? `${passageCount} saved passage${passageCount === 1 ? "" : "s"} in ${groups.length} article${groups.length === 1 ? "" : "s"}. Click excerpt to open · comment saves automatically.`
           : "No passages saved yet. Link this method on the Info tab to add excerpts.";
       }
       renderMentionsList(groups);

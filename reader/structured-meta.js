@@ -1241,6 +1241,7 @@
 
     inner.appendChild(input);
     wrap.append(inner, dropdown);
+
     section.append(labelWrap, suggestBlock, wrap);
 
     renderChips();
