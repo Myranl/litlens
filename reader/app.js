@@ -16,9 +16,25 @@ let returnToMethodCard = null;
 const activeTagFilters = new Set();
 const ARTICLE_STATUS_CHECKED = "checked";
 const HIDE_CHECKED_KEY = "litlens-hide-checked-articles";
+const HIDE_INFO_COMPLETE_KEY = "litlens-hide-info-complete-articles";
 let hideCheckedArticles =
   typeof localStorage !== "undefined" &&
   localStorage.getItem(HIDE_CHECKED_KEY) === "1";
+let hideInfoCompleteArticles =
+  typeof localStorage !== "undefined" &&
+  localStorage.getItem(HIDE_INFO_COMPLETE_KEY) === "1";
+
+/** Info tab: Title, Authors, Year, Journal, Source URL — all non-empty. */
+function isArticleInfoComplete(article) {
+  if (!article) return false;
+  const title = String(article.title || "").trim();
+  if (!title || /^untitled$/i.test(title)) return false;
+  const authors = String(article.authors || "").trim();
+  const year = String(article.year || "").trim();
+  const journal = String(article.journal || "").trim();
+  const url = String(article.url || "").trim();
+  return Boolean(authors && year && journal && url);
+}
 
 function isArticleChecked(article) {
   return article?.status === ARTICLE_STATUS_CHECKED;
@@ -189,17 +205,19 @@ function resolvePassageForBody(body, pin) {
   if (!pin || pin.offset == null) return pin;
   const BM = window.LitLensBookmarks;
   const PL = window.LitLensPassageLinks;
-  if (!BM || !PL?.findPassageInPlain || !pin.quote) {
+  const quote = String(pin.quote || pin.excerpt || "").trim();
+  if (!BM || !PL?.findPassageInPlain || quote.length < 4) {
     return { ...pin, citationOffsets: Boolean(pin.quote) };
   }
+  const cite = { ...pin, quote };
 
   const citationPlain = BM.extractCitationPlainText?.(body) || "";
   const fullPlain = BM.extractPlainText?.(body) || "";
-  let resolved = PL.findPassageInPlain(citationPlain || fullPlain, pin);
+  let resolved = PL.findPassageInPlain(citationPlain || fullPlain, cite);
   let citationOffsets = Boolean(citationPlain);
 
   if (fullPlain && citationPlain && fullPlain !== citationPlain) {
-    const alt = PL.findPassageInPlain(fullPlain, pin);
+    const alt = PL.findPassageInPlain(fullPlain, cite);
     const citeOk = PL.sliceMatchesQuote?.(
       citationPlain,
       resolved.offset,
@@ -299,12 +317,14 @@ window.litlensPinMethodEvidence = (pin, opts = {}) => {
     return false;
   }
   const sentenceBounds = pin.sentenceBounds === true;
+  const quote = String(pin.quote || pin.excerpt || "").trim();
   activePassagePin = {
     offset: pin.offset,
     length: pin.length || 20,
     methodLabel: pin.methodLabel || "",
     sentenceBounds,
     expandToSentence: !sentenceBounds && pin.expandToSentence !== false,
+    quote: quote.length >= 4 ? quote : "",
   };
   return applyActivePassagePin(opts);
 };
@@ -593,10 +613,13 @@ function collectMethodEvidenceLinks() {
   for (const [methodLabel, entries] of Object.entries(evidence)) {
     for (const entry of entries || []) {
       if (entry?.offset == null) continue;
+      const quote = String(entry.excerpt || entry.quote || "").trim();
       links.push({
         offset: entry.offset,
         length: entry.length || 20,
         methodLabel,
+        quote: quote.length >= 4 ? quote : "",
+        sentenceBounds: entry.sentenceBounds === true,
       });
     }
   }
@@ -667,14 +690,14 @@ function refreshArticleHighlights(opts = {}) {
   const body = $("#article-body");
   if (!body || body.style.display === "none" || !window.LitLensHighlight) return;
   const { skipTerms = false, skipAssociation = false, skipEvidence = false } = opts;
+  if (!skipEvidence) {
+    refreshMethodEvidenceLinks(body);
+  }
   if (!skipTerms) {
     LitLensHighlight.applyHighlights(body, getFilteredTermsDoc());
   }
   if (!skipAssociation) {
     refreshMethodAssociationHighlights(body);
-  }
-  if (!skipEvidence) {
-    refreshMethodEvidenceLinks(body);
   }
   if (activePassagePin) {
     applyActivePassagePin({ scroll: false });
@@ -867,11 +890,11 @@ document.addEventListener("visibilitychange", () => {
 function refreshMethodMetaHighlights(kind = "both", { reapplyPin = true } = {}) {
   const body = $("#article-body");
   if (!body || body.style.display === "none") return;
-  if (kind === "association" || kind === "both") {
-    refreshMethodAssociationHighlights(body);
-  }
   if (kind === "evidence" || kind === "both") {
     refreshMethodEvidenceLinks(body);
+  }
+  if (kind === "association" || kind === "both") {
+    refreshMethodAssociationHighlights(body);
   }
   if (reapplyPin && activePassagePin) {
     applyActivePassagePin({ scroll: false });
@@ -928,7 +951,12 @@ function applyScalarMetaToUi(updated) {
   } else {
     link.style.display = "none";
   }
-  updateCurrentArticleListItem(updated);
+  if (hideInfoCompleteArticles) {
+    renderArticleList();
+    updateArticleListActive(currentId);
+  } else {
+    updateCurrentArticleListItem(updated);
+  }
 }
 
 async function saveMetadataScalars() {
@@ -1040,6 +1068,9 @@ async function loadAll() {
   renderTermsPanel();
   renderTagsPanel();
   updateTopbarParagraphProgress();
+  if (window.LitLensMethodsMap?.show) {
+    window.LitLensMethodsMap.show();
+  }
 }
 
 function showColorPicker(anchorEl, currentColor, onPick) {
@@ -1184,6 +1215,7 @@ function renderArticleList() {
   list.replaceChildren();
   const filtered = articles.filter((a) => {
     if (hideCheckedArticles && isArticleChecked(a)) return false;
+    if (hideInfoCompleteArticles && isArticleInfoComplete(a)) return false;
     if (activeTagFilters.size) {
       const ids = a.tagIds || [];
       const has = [...activeTagFilters].some((tid) => ids.includes(tid));
@@ -1192,7 +1224,14 @@ function renderArticleList() {
     return true;
   });
   if (!filtered.length) {
-    const empty = mkEl("p", null, "No articles yet");
+    const hiddenByFilter =
+      articles.length > 0 &&
+      (hideCheckedArticles || hideInfoCompleteArticles || activeTagFilters.size);
+    const empty = mkEl(
+      "p",
+      null,
+      hiddenByFilter ? "No articles match the current filters" : "No articles yet"
+    );
     empty.style.cssText =
       "padding:12px;text-align:center;color:var(--color-text-faint);font-size:12px";
     list.appendChild(empty);
@@ -1253,6 +1292,7 @@ async function selectArticle(id, options = {}) {
     window.LitLensMethodsMap.hide();
   }
   const scrollToTextSpan = options.scrollToTextSpan || null;
+  const wantScrollToMethods = options.scrollToMethods === true;
   const backLabel = String(options.returnToMethodLabel || "").trim();
   if (backLabel) {
     returnToMethodCard = { methodLabel: backLabel };
@@ -1351,7 +1391,8 @@ async function selectArticle(id, options = {}) {
     };
     if (window.BookmarksUI) {
       void BookmarksUI.autoDetectSectionsIfNeeded({
-        scrollToMethods: !scrollToTextSpan && !methodsUnset,
+        scrollToMethods:
+          wantScrollToMethods || (!scrollToTextSpan && !methodsUnset),
         skipDetect: savedStudyMeta,
       }).then(afterSections);
     } else {
@@ -1401,7 +1442,7 @@ async function selectArticle(id, options = {}) {
       if (methodsUnset && !savedStudyMeta && !selectedMethods.length) {
         if (window.BookmarksUI) {
           void BookmarksUI.autoDetectSectionsIfNeeded({
-            scrollToMethods: false,
+            scrollToMethods: wantScrollToMethods,
             skipDetect: false,
           }).then(() => {
             if (switchGen !== articleSwitchGen) return;
@@ -2120,15 +2161,28 @@ $("#cross-search").addEventListener("keydown", (e) => {
   if (e.key === "Enter") runCrossSearch();
 });
 
-(function bindSidebarCheckedFilter() {
+(function bindSidebarLibraryFilters() {
   const hideCb = $("#hide-checked-articles");
-  if (!hideCb) return;
-  hideCb.checked = hideCheckedArticles;
-  hideCb.addEventListener("change", () => {
-    hideCheckedArticles = hideCb.checked;
-    localStorage.setItem(HIDE_CHECKED_KEY, hideCheckedArticles ? "1" : "0");
-    renderArticleList();
-  });
+  if (hideCb) {
+    hideCb.checked = hideCheckedArticles;
+    hideCb.addEventListener("change", () => {
+      hideCheckedArticles = hideCb.checked;
+      localStorage.setItem(HIDE_CHECKED_KEY, hideCheckedArticles ? "1" : "0");
+      renderArticleList();
+    });
+  }
+  const hideInfoCb = $("#hide-info-complete-articles");
+  if (hideInfoCb) {
+    hideInfoCb.checked = hideInfoCompleteArticles;
+    hideInfoCb.addEventListener("change", () => {
+      hideInfoCompleteArticles = hideInfoCb.checked;
+      localStorage.setItem(
+        HIDE_INFO_COMPLETE_KEY,
+        hideInfoCompleteArticles ? "1" : "0"
+      );
+      renderArticleList();
+    });
+  }
 })();
 
 const THEME_STORAGE_KEY = "litlens-theme";

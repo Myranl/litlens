@@ -106,10 +106,18 @@
 
     const variantsWrap = row.querySelector(".profile-variant-list");
     if (variantsWrap) {
+      const links = ML();
+      const PL = window.LitLensPassageLinks;
       profile.variants = MP().normalizeVariants(
-        [...variantsWrap.querySelectorAll(".profile-variant-row input")].map(
-          (inp) => inp.value
-        )
+        readVariantValuesFromWrap(variantsWrap).map((val) => {
+          if (links?.normalizeDocFieldText) {
+            return links.normalizeDocFieldText(val);
+          }
+          if (PL?.normalizeCiteSourceText) {
+            return PL.normalizeCiteSourceText(val);
+          }
+          return val;
+        })
       );
     }
   }
@@ -354,43 +362,128 @@
     }
   }
 
+  function readVariantValuesFromWrap(wrap) {
+    return [...wrap.querySelectorAll(
+      ".profile-variant-row textarea, .profile-variant-row input"
+    )].map((el) => el.value);
+  }
+
+  function syncVariantPreview(ta, preview, previewCtx) {
+    const PL = window.LitLensPassageLinks;
+    const links = ML();
+    const IF = window.LitLensInlineFormat;
+    const val = ta.value;
+    const hasCite = PL?.hasCiteMarkup?.(val);
+    const hasMethodLink =
+      links?.hasMethodLinkMarkup?.(val) || /\[\[method:/i.test(val);
+    const hasFmt = IF?.hasInlineFormat?.(val);
+    if (!hasCite && !hasMethodLink && !hasFmt) {
+      preview.replaceChildren();
+      preview.hidden = true;
+      return;
+    }
+    preview.hidden = false;
+    preview.replaceChildren();
+    if (links?.renderMethodDocFragment) {
+      preview.appendChild(
+        links.renderMethodDocFragment(val, previewCtx)
+      );
+    } else if (hasCite && PL) {
+      const norm = PL.normalizeCiteSourceText
+        ? PL.normalizeCiteSourceText(val)
+        : val;
+      preview.appendChild(
+        PL.renderDocFragment(
+          norm,
+          previewCtx.articlesById,
+          previewCtx.onCiteClick,
+          previewCtx.citeStore
+        )
+      );
+    } else if (hasFmt && IF?.appendFormattedText) {
+      IF.appendFormattedText(preview, val);
+    }
+  }
+
   function renderVariantRows(profile, wrap, options = {}) {
     const onDirty = options.onDirty || (() => markDirty());
+    const rich = options.rich !== false;
+    const previewCtx = options.previewCtx || {};
+    const existing = readVariantValuesFromWrap(wrap);
+    if (existing.length) profile.variants = existing;
     wrap.replaceChildren();
     if (!Array.isArray(profile.variants)) profile.variants = [];
+
     profile.variants.forEach((text, rowIdx) => {
       const row = document.createElement("div");
       row.className = "profile-variant-row";
-      const inp = document.createElement("input");
-      inp.type = "text";
-      inp.className = "form-input profile-alias-input";
-      inp.value = text;
-      inp.placeholder = "Variant name or description";
-      inp.addEventListener("input", onDirty);
+
+      const editorCol = document.createElement("div");
+      editorCol.className = "profile-variant-editor";
+
+      const IF = window.LitLensInlineFormat;
+      const ta = document.createElement("textarea");
+      ta.className = "form-input profile-variant-textarea";
+      ta.rows = 3;
+      ta.value = text;
+      ta.placeholder = rich
+        ? "Formatting: <b>bold</b>, <i>italic</i>, <ul><li>bullets</li></ul>. Line breaks allowed."
+        : "Variant name or description (line breaks allowed)";
+
+      if (rich) {
+        const fmtBar = IF?.buildFormatToolbar ? IF.buildFormatToolbar(ta) : null;
+        const preview = document.createElement("div");
+        preview.className =
+          "profile-variant-preview methods-map-doc-preview";
+        preview.hidden = true;
+        const syncPreview = () => syncVariantPreview(ta, preview, previewCtx);
+        const onInput = () => {
+          onDirty();
+          syncPreview();
+        };
+        ta.addEventListener("input", onInput);
+        ta.addEventListener("paste", () => window.setTimeout(syncPreview, 0));
+        if (fmtBar) {
+          fmtBar.querySelectorAll("button").forEach((btn) => {
+            btn.addEventListener("click", () => window.setTimeout(syncPreview, 0));
+          });
+          editorCol.append(fmtBar, ta, preview);
+        } else {
+          editorCol.append(ta, preview);
+        }
+        syncPreview();
+      } else {
+        ta.addEventListener("input", onDirty);
+        editorCol.appendChild(ta);
+      }
+
       const del = document.createElement("button");
       del.type = "button";
-      del.className = "btn-sm btn-ghost";
+      del.className = "btn-sm btn-ghost profile-variant-remove";
       del.textContent = "×";
       del.title = "Remove variant";
       del.addEventListener("mousedown", (e) => e.preventDefault());
       del.addEventListener("click", () => {
-        profile.variants.splice(rowIdx, 1);
+        const values = readVariantValuesFromWrap(wrap);
+        values.splice(rowIdx, 1);
+        profile.variants = values;
         renderVariantRows(profile, wrap, options);
         onDirty();
       });
-      row.append(inp, del);
+      row.append(editorCol, del);
       wrap.appendChild(row);
     });
+
     const addBtn = document.createElement("button");
     addBtn.type = "button";
     addBtn.className = "btn-sm btn-ghost profile-variant-add";
     addBtn.textContent = "+ Variant";
     addBtn.addEventListener("click", () => {
+      profile.variants = readVariantValuesFromWrap(wrap);
       profile.variants.push("");
       renderVariantRows(profile, wrap, options);
       onDirty();
-      const firstInp = wrap.querySelector(".profile-variant-row input");
-      firstInp?.focus();
+      wrap.querySelector(".profile-variant-textarea")?.focus();
     });
     wrap.appendChild(addBtn);
   }

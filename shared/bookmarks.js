@@ -362,10 +362,30 @@
     root.querySelectorAll(`mark.${METHOD_LINKED_CLASS}`).forEach(unwrapMark);
   }
 
+  /** Align stored offsets with live body text (excerpt quote + optional sentence span). */
+  function resolveMethodEvidenceSpan(root, link) {
+    const plain = extractPlainText(root);
+    let offset = link.offset;
+    let length = Math.max(1, link.length || 1);
+    const quote = String(link.quote || link.excerpt || "").trim();
+    const PL =
+      typeof LitLensPassageLinks !== "undefined" ? LitLensPassageLinks : null;
+    if (PL?.findPassageInPlain && quote.length >= 4) {
+      const found = PL.findPassageInPlain(plain, { offset, length, quote });
+      offset = found.offset;
+      length = found.length;
+    } else if (link.sentenceBounds === true) {
+      const expanded = expandToSentenceBounds(plain, offset, length);
+      offset = expanded.offset;
+      length = expanded.length;
+    }
+    return { offset, length };
+  }
+
   /**
    * Wrap saved method-evidence passages (persistent while reading).
    * @param {HTMLElement} root
-   * @param {{ offset: number, length?: number, methodLabel: string }[]} links
+   * @param {{ offset: number, length?: number, methodLabel: string, quote?: string, excerpt?: string, sentenceBounds?: boolean }[]} links
    */
   function applyMethodEvidenceLinks(root, links) {
     if (!root) return;
@@ -385,8 +405,8 @@
     }
     const label = String(link.methodLabel || "").trim();
     if (!label) return false;
-    const len = Math.max(1, link.length || 1);
-    const range = rangeFromTextSpan(root, link.offset, len);
+    const { offset, length } = resolveMethodEvidenceSpan(root, link);
+    const range = rangeFromTextSpan(root, offset, length);
     if (!range) return false;
     try {
       wrapRangeWithLinkedMark(range, { methodLabel: label });

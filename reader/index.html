@@ -39,10 +39,16 @@
     <span id="server-status" class="sr-only" aria-live="polite">Connecting to server…</span>
     <div class="sidebar-library-head">
       <p class="sidebar-library-stats" id="sidebar-library-stats"></p>
-      <label class="sidebar-hide-checked">
-        <input type="checkbox" id="hide-checked-articles">
-        <span>Hide processed articles</span>
-      </label>
+      <div class="sidebar-library-filters">
+        <label class="sidebar-hide-checked">
+          <input type="checkbox" id="hide-checked-articles">
+          <span>Hide processed articles</span>
+        </label>
+        <label class="sidebar-hide-checked">
+          <input type="checkbox" id="hide-info-complete-articles">
+          <span>Hide articles with Info filled</span>
+        </label>
+      </div>
     </div>
     <div class="tag-filter-section" id="tag-filter-section" style="display:none">
       <div class="tag-filter-label">Filter by tag</div>
@@ -110,6 +116,7 @@
           <div class="methods-map-mentions-head">
             <button type="button" class="btn-sm btn-ghost" id="methods-map-mentions-back">← Map</button>
             <h3 class="methods-map-mentions-title" id="methods-map-mentions-title"></h3>
+            <button type="button" class="methods-map-library-corner-btn" id="methods-map-library-corner-btn" title="Search whole library for trigger words" aria-label="Search library for this method">⌕ Library</button>
             <div class="methods-map-card-toolbar" id="methods-map-card-toolbar">
               <button type="button" class="btn-sm btn-ghost" id="methods-map-copy-link" title="Copy [[method:…]] for Definition and other text fields">⎘ Link</button>
               <button type="button" class="method-catalog-edit-btn" id="methods-map-card-edit" title="Edit method card">✎</button>
@@ -119,16 +126,36 @@
             </div>
           </div>
           <div class="methods-map-mentions-layout">
-            <div class="methods-map-mentions-main">
-              <div id="methods-map-method-card" class="methods-map-method-card"></div>
-              <p class="methods-map-mentions-hint" id="methods-map-mentions-hint"></p>
-              <div id="methods-map-mentions-list" class="methods-map-mentions-list"></div>
+            <div class="methods-map-mentions-body">
+              <div class="methods-map-mentions-main">
+                <div id="methods-map-method-card" class="methods-map-method-card"></div>
+              </div>
+              <aside class="methods-map-mentions-aside" aria-label="Method usage and links">
+                <div class="methods-map-chart-panel">
+                  <p class="notes-label methods-map-chart-label">Library usage by year</p>
+                  <p class="meta-hint methods-map-chart-hint">Articles with this method in Info (year from metadata).</p>
+                  <p class="methods-map-library-coverage" id="methods-map-library-coverage" hidden></p>
+                  <div id="methods-map-method-chart" class="methods-map-method-chart"></div>
+                </div>
+                <div id="methods-map-first-in-panel" class="methods-map-first-in-panel"></div>
+                <div id="methods-map-relations-panel" class="methods-map-relations-panel"></div>
+              </aside>
             </div>
-            <aside class="methods-map-chart-panel">
-              <p class="notes-label methods-map-chart-label">Library usage by year</p>
-              <p class="meta-hint methods-map-chart-hint">Articles with this method in Info (year from metadata).</p>
-              <div id="methods-map-method-chart" class="methods-map-method-chart"></div>
-            </aside>
+            <section class="methods-map-passages-block" aria-label="Saved and library passages">
+              <div class="methods-map-passages-toolbar">
+                <div class="methods-map-mentions-subtabs" role="tablist" aria-label="Method mentions views">
+                  <button type="button" class="methods-map-mentions-subtab" id="methods-map-tab-library" role="tab" aria-selected="false">Library scan</button>
+                  <button type="button" class="methods-map-mentions-subtab methods-map-mentions-subtab--active" id="methods-map-tab-passages" role="tab" aria-selected="true">Saved passages</button>
+                </div>
+                <button type="button" class="btn-sm btn-ghost methods-map-export-citations-btn" id="methods-map-export-citations" title="Download author, year, and quote for all saved passages and pending library matches">Export citations</button>
+              </div>
+              <p class="methods-map-mentions-hint" id="methods-map-mentions-hint"></p>
+              <div id="methods-map-mentions-panels" class="methods-map-mentions-panels">
+                <div id="methods-map-library-scan" class="methods-map-library-scan"></div>
+                <div id="methods-map-library-absent-wrap" class="methods-map-library-absent-wrap" hidden></div>
+                <div id="methods-map-mentions-list" class="methods-map-mentions-list"></div>
+              </div>
+            </section>
           </div>
         </div>
       </div>
@@ -334,8 +361,10 @@
 <script src="/shared/paragraph-blocks.js"></script>
 <script src="/shared/article-extract.js"></script>
 <script src="/shared/section-detect.js"></script>
+<script src="/shared/article-plain.js"></script>
 <script src="/shared/method-profiles.js"></script>
 <script src="/shared/vocab-term-profiles.js"></script>
+<script src="/shared/inline-format.js"></script>
 <script src="/shared/method-links.js?v=20"></script>
 <script src="/shared/passage-links.js"></script>
 <script src="passage-cite-store.js"></script>

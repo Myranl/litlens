@@ -112,6 +112,7 @@ app.patch("/api/articles/:id", (req, res) => {
     highlightForceShown,
     methodSuggestionsDismissed,
     methodSuggestionsDismissedHits,
+    methodAbsentLabels,
     methodEvidence,
     foundTermAliases,
     readParagraphOffsets,
@@ -138,6 +139,9 @@ app.patch("/api/articles/:id", (req, res) => {
   }
   if (methodSuggestionsDismissedHits !== undefined) {
     patch.methodSuggestionsDismissedHits = methodSuggestionsDismissedHits;
+  }
+  if (methodAbsentLabels !== undefined) {
+    patch.methodAbsentLabels = methodAbsentLabels;
   }
   if (methodEvidence !== undefined && typeof methodEvidence === "object") {
     patch.methodEvidence = methodEvidence;
@@ -220,6 +224,21 @@ app.get("/api/search", (req, res) => {
   const q = (req.query.q || "").trim();
   if (!q) return res.json([]);
   res.json(storage.searchArticles(q));
+});
+
+app.get("/api/method-library-scan", (req, res) => {
+  const label = (req.query.label || req.query.method || "").trim();
+  if (!label) {
+    return res.status(400).json({ error: "label query required" });
+  }
+  const methodsOnly =
+    req.query.full !== "1" && req.query.methodsOnly !== "0";
+  try {
+    res.json(storage.scanMethodInLibrary(label, { methodsOnly }));
+  } catch (e) {
+    console.error("GET /api/method-library-scan failed:", e);
+    res.status(500).json({ error: e.message || "Scan failed" });
+  }
 });
 
 app.use("/shared", express.static(path.join(__dirname, "..", "shared")));

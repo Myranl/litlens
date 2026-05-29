@@ -235,7 +235,24 @@
 
   /** Merge hits that share the same sentence span (period → period), not a wide min–max range. */
   function groupMethodHitsIntoPassages(item, hits) {
-    const plain = getArticlePlainText();   // one DOM walk for the whole batch
+    const plain = getArticlePlainText();
+    const MP = window.LitLensMethodProfiles;
+    if (MP?.groupHitsIntoSentencePassages) {
+      const normalized = hits.map((hit) => ({
+        offset: hit.globalOffset,
+        matchedTerm: hit.matchedTerm,
+        matchType: hit.matchType,
+      }));
+      return MP.groupHitsIntoSentencePassages(plain, normalized).map((p) => ({
+        offset: p.offset,
+        length: p.length,
+        hits: p.hits.map((h) => ({
+          globalOffset: h.offset,
+          matchedTerm: h.matchedTerm,
+          matchType: h.matchType,
+        })),
+      }));
+    }
     const groups = new Map();
     for (const hit of hits) {
       const bounds = sentenceSpanForHit(item, hit, plain);
@@ -288,8 +305,7 @@
 
   function buildSentenceEvidenceCandidate(item, passage) {
     const plain = getArticlePlainText();
-    const body = getArticleBody();
-    const anchor = passage.hits[0]?.globalOffset ?? passage.offset;
+    const MP = window.LitLensMethodProfiles;
     const terms = [
       ...new Set(passage.hits.map((h) => h.matchedTerm).filter(Boolean)),
     ];
@@ -297,11 +313,15 @@
       ...new Set(passage.hits.map((h) => h.matchType).filter(Boolean)),
     ];
     let excerpt = "";
-    if (body && window.LitLensBookmarks?.excerptAtOffset) {
-      excerpt = LitLensBookmarks.excerptAtOffset(body, anchor, 200);
-    }
-    if (!excerpt) {
-      excerpt = excerptFromPlain(plain, anchor, passage.length);
+    if (MP?.sentenceExcerptFromPlain) {
+      excerpt = MP.sentenceExcerptFromPlain(
+        plain,
+        passage.offset,
+        passage.length,
+        420
+      );
+    } else {
+      excerpt = excerptFromPlain(plain, passage.offset, passage.length);
     }
     return {
       id: `ev-${passage.offset}`,
@@ -663,10 +683,13 @@
     if (!entry || entry.offset == null) return false;
     const append = window.litlensAppendMethodEvidenceLink;
     if (typeof append !== "function") return false;
+    const quote = String(entry.excerpt || entry.quote || "").trim();
     return append({
       offset: entry.offset,
       length: entry.length || 20,
       methodLabel,
+      quote: quote.length >= 4 ? quote : "",
+      sentenceBounds: entry.sentenceBounds === true,
     });
   }
 
@@ -1705,6 +1728,10 @@
 
     if (passages) {
       const passage = passages[idx];
+      const plain = getArticlePlainText();
+      const quote =
+        MP?.sentenceExcerptFromPlain?.(plain, passage.offset, passage.length, 420) ||
+        "";
       let ok = false;
       if (typeof window.litlensPinMethodEvidence === "function") {
         ok = window.litlensPinMethodEvidence(
@@ -1713,6 +1740,7 @@
             length: passage.length,
             methodLabel: item.label,
             sentenceBounds: true,
+            quote,
           },
           { scroll: true }
         );
@@ -2221,7 +2249,30 @@
           dismissSuggestionPassage(item, passage);
         });
 
-        rowActions.append(acceptHit, dismissHit);
+        if (item.vocabKey === "methods") {
+          const articleId = window.litlensCurrentId?.();
+          const MM = window.LitLensMethodsMap;
+          if (articleId && MM?.createPassageCiteCopyButton) {
+            rowActions.append(
+              acceptHit,
+              MM.createPassageCiteCopyButton(
+                articleId,
+                {
+                  offset: passage.offset,
+                  length: passage.length,
+                  excerpt: candidate.excerpt,
+                  quote: candidate.excerpt,
+                },
+                { btnClass: "method-suggest-loc-copy" }
+              ),
+              dismissHit
+            );
+          } else {
+            rowActions.append(acceptHit, dismissHit);
+          }
+        } else {
+          rowActions.append(acceptHit, dismissHit);
+        }
         row.append(jump, rowActions);
         locs.appendChild(row);
       });

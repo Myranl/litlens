@@ -152,6 +152,9 @@ function normalizeArticleMeta(meta) {
     )
       ? [...meta.methodSuggestionsDismissedHits]
       : [],
+    methodAbsentLabels: MP.normalizeMethodAbsentLabels(
+      meta.methodAbsentLabels
+    ),
     methodEvidence:
       meta.methodEvidence && typeof meta.methodEvidence === "object"
         ? { ...meta.methodEvidence }
@@ -431,6 +434,131 @@ function registerPassageCitation(entry) {
   return { id, entry: normalized, created: true };
 }
 
+const MP = require("../shared/method-profiles");
+const PL = require("../shared/passage-links");
+
+const ArticlePlain = require("../shared/article-plain");
+
+function articlePlainForScan(article) {
+  return ArticlePlain.articlePlain(article);
+}
+
+function bookmarksForScan(article, plain) {
+  const saved = Array.isArray(article?.bookmarks) ? article.bookmarks : [];
+  const detected = MP.detectSectionBookmarksInPlain(plain);
+  return MP.mergeSectionBookmarksForScan(saved, detected);
+}
+
+/**
+ * Reverse search: scan all library articles for method catalog triggers.
+ * @returns {{ methodLabel: string, profileFound: boolean, articles: object[], totalPassages: number, articleCount: number }}
+ */
+function scanMethodInLibrary(methodLabel, options = {}) {
+  const methodsOnly = options.methodsOnly !== false;
+  const label = String(methodLabel || "").trim();
+  if (!label) {
+    return {
+      methodLabel: "",
+      profileFound: false,
+      methodsOnly,
+      articles: [],
+      totalPassages: 0,
+      articleCount: 0,
+    };
+  }
+  const vocab = getVocab();
+  MP.ensureCatalog(vocab);
+  const profile = MP.profileByLabel(vocab, label);
+  if (!profile) {
+    return {
+      methodLabel: label,
+      profileFound: false,
+      methodsOnly,
+      articles: [],
+      totalPassages: 0,
+      articleCount: 0,
+    };
+  }
+
+  const articlesOut = [];
+  let totalPassages = 0;
+  let skippedNoMethods = 0;
+
+  for (const meta of listArticles()) {
+    const full = getArticle(meta.id);
+    if (!full) continue;
+    if (MP.isMethodAbsentFromArticle(full, label)) continue;
+    if (MP.articleSkipsMethodLibraryScan(full, label)) continue;
+    const plain = articlePlainForScan(full);
+    if (!plain.trim()) continue;
+
+    const scope = MP.resolveMethodsScanScope(plain, bookmarksForScan(full, plain), {
+      methodsOnly,
+    });
+    if (!scope?.text?.trim()) {
+      if (methodsOnly) skippedNoMethods += 1;
+      continue;
+    }
+
+    const passages = MP.groupProfileHitsIntoPassages(
+      scope.text,
+      profile,
+      300
+    );
+    if (!passages.length) continue;
+
+    const scopeStart = scope.start;
+    const maxHitsPerArticle = 24;
+    const hits = passages.slice(0, maxHitsPerArticle).map((p) => {
+      const globalOffset = scopeStart + p.offset;
+      const terms = [
+        ...new Set(p.hits.map((h) => h.matchedTerm).filter(Boolean)),
+      ];
+      const matchTypes = [
+        ...new Set(p.hits.map((h) => h.matchType).filter(Boolean)),
+      ];
+      const excerpt = MP.sentenceExcerptFromPlain(
+        plain,
+        globalOffset,
+        p.length,
+        480
+      );
+      return {
+        offset: globalOffset,
+        length: p.length,
+        matchedTerm: terms.join(", "),
+        matchType: matchTypes.length === 1 ? matchTypes[0] : "direct",
+        excerpt,
+        quote: excerpt,
+        sentenceBounds: true,
+      };
+    });
+
+    totalPassages += passages.length;
+    articlesOut.push({
+      articleId: meta.id,
+      title: meta.title || "Untitled",
+      authors: meta.authors || "",
+      year: meta.year || "",
+      hitCount: passages.length,
+      hits,
+      scopeSource: scope.source,
+    });
+  }
+
+  articlesOut.sort((a, b) => PL.compareArticlesBibliographic(a, b));
+
+  return {
+    methodLabel: label,
+    profileFound: true,
+    methodsOnly,
+    articles: articlesOut,
+    totalPassages,
+    articleCount: articlesOut.length,
+    skippedNoMethods,
+  };
+}
+
 function searchArticles(query, limit = 50) {
   const q = query.toLowerCase();
   const hits = [];
@@ -476,4 +604,5 @@ module.exports = {
   registerPassageCitation,
   exportMetaCsv,
   searchArticles,
+  scanMethodInLibrary,
 };

@@ -70,6 +70,64 @@
     return /\[Author\?\]|\[Year\?\]/.test(String(label || ""));
   }
 
+  /** Surname (or last token) of the first author for stable bibliography sort. */
+  function firstAuthorSortKey(authors) {
+    const raw = String(authors || "").trim();
+    if (!raw) return "";
+    const first = raw.split(/[,;]|\s+and\s+/i)[0].trim();
+    if (!first) return "";
+    if (first.includes(",")) {
+      return first.split(",")[0].trim().toLowerCase();
+    }
+    const parts = first.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) return parts[parts.length - 1].toLowerCase();
+    return first.toLowerCase();
+  }
+
+  /**
+   * Stable article order: first author A→Z, then year (newer first), then title.
+   * @param {{ authors?: string, year?: string, title?: string, structured?: object }} a
+   * @param {{ authors?: string, year?: string, title?: string, structured?: object }} b
+   */
+  function compareArticlesBibliographic(a, b) {
+    const authorCmp = firstAuthorSortKey(a?.authors).localeCompare(
+      firstAuthorSortKey(b?.authors),
+      undefined,
+      { sensitivity: "base", numeric: true }
+    );
+    if (authorCmp !== 0) return authorCmp;
+
+    const yearA = parseInt(parseYear(a) || "0", 10) || 0;
+    const yearB = parseInt(parseYear(b) || "0", 10) || 0;
+    if (yearA !== yearB) return yearB - yearA;
+
+    return String(a?.title || "").localeCompare(String(b?.title || ""), undefined, {
+      sensitivity: "base",
+      numeric: true,
+    });
+  }
+
+  /** Year descending (newest first); articles without year last; then title. */
+  function compareArticlesByYear(a, b) {
+    const yearA = parseInt(parseYear(a) || "0", 10) || 0;
+    const yearB = parseInt(parseYear(b) || "0", 10) || 0;
+    const hasA = yearA > 0;
+    const hasB = yearB > 0;
+    if (!hasA && !hasB) {
+      return String(a?.title || "").localeCompare(String(b?.title || ""), undefined, {
+        sensitivity: "base",
+        numeric: true,
+      });
+    }
+    if (!hasA) return 1;
+    if (!hasB) return -1;
+    if (yearA !== yearB) return yearB - yearA;
+    return String(a?.title || "").localeCompare(String(b?.title || ""), undefined, {
+      sensitivity: "base",
+      numeric: true,
+    });
+  }
+
   function buildShortToken(citeId, label) {
     const id = String(citeId || "").trim();
     if (!id) return "";
@@ -329,17 +387,40 @@
   }
 
   function renderDocFragment(text, articlesById, onCiteClick, citeStore) {
+    const ML =
+      typeof globalThis !== "undefined"
+        ? globalThis.LitLensMethodLinks
+        : null;
+    if (ML?.renderMethodDocFragment) {
+      return ML.renderMethodDocFragment(text, {
+        articlesById,
+        onCiteClick,
+        citeStore,
+        vocab: null,
+        onMethodClick: null,
+      });
+    }
+
     const frag = document.createDocumentFragment();
     const parts = splitDocText(text, citeStore);
     if (!parts.length && !text) return frag;
 
+    const IF =
+      typeof globalThis !== "undefined"
+        ? globalThis.LitLensInlineFormat
+        : null;
+
     for (const part of parts) {
       if (part.type === "text") {
-        const lines = part.value.split("\n");
-        lines.forEach((line, i) => {
-          if (i > 0) frag.appendChild(document.createElement("br"));
-          if (line) frag.appendChild(document.createTextNode(line));
-        });
+        if (IF?.appendFormattedText) {
+          IF.appendFormattedText(frag, part.value);
+        } else {
+          const lines = part.value.split("\n");
+          lines.forEach((line, i) => {
+            if (i > 0) frag.appendChild(document.createElement("br"));
+            if (line) frag.appendChild(document.createTextNode(line));
+          });
+        }
         continue;
       }
       const article =
@@ -379,6 +460,9 @@
     formatArticleCite,
     formatCiteLabel,
     citeLabelNeedsMetadata,
+    firstAuthorSortKey,
+    compareArticlesBibliographic,
+    compareArticlesByYear,
     buildToken,
     buildShortToken,
     parseToken,

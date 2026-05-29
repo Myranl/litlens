@@ -144,7 +144,7 @@ function collectTextNodesForMethodAssoc(root) {
       if (p.closest?.("[data-litlens-ignore]")) return NodeFilter.FILTER_REJECT;
       if (
         p.closest?.(
-          "mark.kw-highlight, mark.method-assoc-highlight, mark.litlens-method-evidence-pin, .litlens-method-evidence-pin-block, mark.litlens-method-linked"
+          "mark.method-assoc-highlight, mark.litlens-method-evidence-pin, .litlens-method-evidence-pin-block, mark.litlens-method-linked"
         )
       ) {
         return NodeFilter.FILTER_REJECT;

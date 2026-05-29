@@ -759,7 +759,105 @@
     return parts;
   }
 
-  function appendTextWithBreaks(frag, text) {
+  function getInlineFormat() {
+    const g =
+      typeof globalThis !== "undefined"
+        ? globalThis
+        : typeof window !== "undefined"
+          ? window
+          : null;
+    return (g && g.LitLensInlineFormat) || null;
+  }
+
+  /** Drop accidental second copy of list innards after </ul> (paste / edit glitch). */
+  function stripDuplicateListSuffix(text) {
+    const hay = String(text || "");
+    const m = hay.match(
+      /^([\s\S]*?<(?:ul|ol)\s*>)([\s\S]*?)(<\/(?:ul|ol)>)\s*([\s\S]+)$/i
+    );
+    if (!m) return hay;
+    const inner = m[2];
+    const tail = m[4].trim();
+    if (!tail || tail.length < 12) return hay;
+    const listDebris =
+      /^(?:\[\[cite:|<\/?li\b|<\/?ul\b|<\/?ol\b)/i.test(tail) ||
+      (/\[\[cite:/i.test(tail) && /<\/li>/i.test(tail));
+    const tailBody = tail.replace(/<\/(?:ul|ol)>\s*$/i, "").trim();
+    if (
+      listDebris &&
+      (inner.includes(tail) || (tailBody && inner.includes(tailBody)))
+    ) {
+      return `${m[1]}${inner}${m[3]}`;
+    }
+    return hay;
+  }
+
+  function normalizeDocFieldText(text) {
+    const PL = getPassageLinks();
+    let hay = stripDuplicateListSuffix(text);
+    return PL?.normalizeCiteSourceText
+      ? PL.normalizeCiteSourceText(hay)
+      : String(hay || "");
+  }
+
+  function isListMarkupDebris(text) {
+    const t = String(text || "").trim();
+    if (!t) return false;
+    return (
+      /^<\/?(?:li|ul|ol)\b/i.test(t) ||
+      (/\[\[cite:/i.test(t) && /<\/li>/i.test(t) && !/^<(?:ul|ol)\b/i.test(t))
+    );
+  }
+
+  function findBalancedListClose(hay, openIndex, tagName) {
+    const reOpen = new RegExp(`<${tagName}(?:\\s[^>]*)?>`, "gi");
+    const reClose = new RegExp(`</${tagName}\\s*>`, "gi");
+    let depth = 0;
+    let pos = openIndex;
+    while (pos < hay.length) {
+      reOpen.lastIndex = pos;
+      reClose.lastIndex = pos;
+      const nextOpen = reOpen.exec(hay);
+      const nextClose = reClose.exec(hay);
+      if (!nextClose && !nextOpen) break;
+      if (nextOpen && (!nextClose || nextOpen.index < nextClose.index)) {
+        depth++;
+        pos = nextOpen.index + nextOpen[0].length;
+        continue;
+      }
+      depth--;
+      pos = nextClose.index + nextClose[0].length;
+      if (depth === 0) return pos;
+    }
+    return -1;
+  }
+
+  function findListRanges(hay) {
+    const ranges = [];
+    const openRe = /<(?:ul|ol)\s*>/gi;
+    let m;
+    while ((m = openRe.exec(hay))) {
+      const ordered = /^<ol/i.test(m[0]);
+      const tag = ordered ? "ol" : "ul";
+      const end = findBalancedListClose(hay, m.index, tag);
+      if (end < 0) continue;
+      ranges.push({
+        start: m.index,
+        end,
+        raw: hay.slice(m.index, end),
+        ordered,
+      });
+      openRe.lastIndex = end;
+    }
+    return ranges;
+  }
+
+  function appendTextWithBreaks(frag, text, opts) {
+    const IF = getInlineFormat();
+    if (IF?.appendFormattedText) {
+      IF.appendFormattedText(frag, text, opts);
+      return;
+    }
     const lines = String(text || "").split("\n");
     lines.forEach((line, i) => {
       if (i > 0) frag.appendChild(document.createElement("br"));
@@ -767,72 +865,325 @@
     });
   }
 
-  function renderMethodDocFragment(text, options = {}) {
-    const {
-      articlesById,
-      onCiteClick,
-      citeStore,
-      vocab,
-      onMethodClick,
-    } = options;
-    const PL = getPassageLinks();
-    const frag = document.createDocumentFragment();
-    const parts = mergedDocParts(text, citeStore, vocab);
-    if (!parts.length && !text) return frag;
+  function isInsideRanges(index, ranges) {
+    return ranges.some((r) => index >= r.start && index < r.end);
+  }
 
-    for (const part of parts) {
-      if (part.type === "text") {
-        appendTextWithBreaks(frag, part.value);
-        continue;
-      }
-      if (part.type === "method") {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "method-cite-link method-ref-link";
-        if (part.missing) btn.classList.add("method-cite-link--missing");
-        btn.textContent = part.methodLabel || part.label || part.id;
-        btn.title = part.missing
-          ? "Method not in catalog"
-          : `Open method: ${part.methodLabel}`;
-        btn.addEventListener("click", (e) => {
-          e.preventDefault();
-          if (part.missing) return;
-          onMethodClick?.(part.methodLabel);
-        });
-        frag.appendChild(btn);
-        continue;
-      }
-      const article =
-        part.articleId &&
-        (articlesById instanceof Map
-          ? articlesById.get(part.articleId)
-          : articlesById?.[part.articleId]);
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "method-cite-link";
-      if (part.missing) btn.classList.add("method-cite-link--missing");
-      btn.textContent =
-        part.label?.trim() ||
-        (PL?.formatArticleCite ? PL.formatArticleCite(article) : "") ||
-        part.citeId ||
-        "cite";
-      btn.title = part.missing
-        ? "Citation data missing — re-copy from article"
-        : article?.title
-          ? `Open: ${article.title}`
-          : "Open passage in article";
-      btn.addEventListener("click", (e) => {
-        e.preventDefault();
-        if (part.missing || part.articleId == null || part.offset == null) return;
-        onCiteClick?.({
-          articleId: part.articleId,
-          offset: part.offset,
-          length: part.length,
-          quote: part.quote || "",
-        });
+  function appendCiteButton(frag, part, ctx) {
+    const PL = getPassageLinks();
+    const { articlesById, onCiteClick, citeStore } = ctx;
+    const article =
+      part.articleId &&
+      (articlesById instanceof Map
+        ? articlesById.get(part.articleId)
+        : articlesById?.[part.articleId]);
+    const stored =
+      part.citeId &&
+      (typeof citeStore?.get === "function"
+        ? citeStore.get(part.citeId)
+        : citeStore?.[part.citeId]);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "method-cite-link";
+    if (part.missing) btn.classList.add("method-cite-link--missing");
+    btn.textContent =
+      part.label?.trim() ||
+      (PL?.formatArticleCite ? PL.formatArticleCite(article) : "") ||
+      part.citeId ||
+      "cite";
+    btn.title = part.missing
+      ? "Citation data missing — re-copy from article"
+      : article?.title
+        ? `Open: ${article.title}`
+        : "Open passage in article";
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      const articleId = part.articleId || stored?.articleId;
+      const offset = part.offset ?? stored?.offset;
+      const length = part.length ?? stored?.length;
+      if (part.missing || articleId == null || offset == null) return;
+      onCiteClick?.({
+        articleId,
+        offset,
+        length,
+        quote: part.quote || stored?.quote || "",
       });
-      frag.appendChild(btn);
+    });
+    frag.appendChild(btn);
+  }
+
+  function appendMethodButton(frag, part, ctx) {
+    const { onMethodClick } = ctx;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "method-cite-link method-ref-link";
+    if (part.missing) btn.classList.add("method-cite-link--missing");
+    btn.textContent = part.methodLabel || part.label || part.id;
+    btn.title = part.missing
+      ? "Method not in catalog"
+      : `Open method: ${part.methodLabel}`;
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (part.missing) return;
+      onMethodClick?.(part.methodLabel);
+    });
+    frag.appendChild(btn);
+  }
+
+  function citePartFromMatch(match, citeStore, vocab) {
+    const PL = getPassageLinks();
+    if (match.kind === "method") {
+      const profile =
+        findInCatalog(vocab, match.id) || findInCatalog(vocab, match.label);
+      return {
+        type: "method",
+        id: match.id,
+        label: match.label,
+        methodLabel: profile?.label || match.label,
+        missing: !profile,
+      };
     }
+    if (match.kind === "ref") {
+      const stored =
+        typeof citeStore?.get === "function"
+          ? citeStore.get(match.citeId)
+          : citeStore?.[match.citeId];
+      return {
+        type: "cite",
+        citeId: match.citeId,
+        articleId: stored?.articleId,
+        offset: stored?.offset,
+        length: stored?.length,
+        quote: stored?.quote || "",
+        label: match.label || stored?.label || "",
+        missing: !stored?.articleId,
+      };
+    }
+    return {
+      type: "cite",
+      articleId: match.articleId,
+      offset: match.offset,
+      length: match.length,
+      label: match.label,
+      quote: match.quote,
+      missing: false,
+    };
+  }
+
+  function citeYearForSort(part, ctx) {
+    const PL = getPassageLinks();
+    const label = String(part?.label || "").trim();
+    const fromLabel = label.match(/\b(19|20)\d{2}\b/);
+    if (fromLabel) return parseInt(fromLabel[0], 10);
+    const { citeStore, articlesById } = ctx;
+    let article = null;
+    if (part?.citeId && citeStore) {
+      const stored =
+        typeof citeStore.get === "function"
+          ? citeStore.get(part.citeId)
+          : citeStore?.[part.citeId];
+      if (stored?.articleId) {
+        article =
+          articlesById instanceof Map
+            ? articlesById.get(stored.articleId)
+            : articlesById?.[stored.articleId];
+      }
+    } else if (part?.articleId) {
+      article =
+        articlesById instanceof Map
+          ? articlesById.get(part.articleId)
+          : articlesById?.[part.articleId];
+    }
+    if (article && PL?.parseYear) {
+      return parseInt(PL.parseYear(article) || "0", 10) || 0;
+    }
+    return 0;
+  }
+
+  /** True when gaps between cites are only commas/whitespace (safe to reorder). */
+  function citeGapsAllowReorder(hay, citeMatches) {
+    for (let i = 1; i < citeMatches.length; i++) {
+      const gap = hay.slice(citeMatches[i - 1].lastIndex, citeMatches[i].index);
+      if (/[A-Za-z]{2,}/.test(gap)) return false;
+    }
+    return true;
+  }
+
+  /** Multiple [[cite:…]] in one block → newest year first (preview + read mode). */
+  function appendContentWithSortedCites(parent, text, ctx) {
+    const hay = normalizeDocFieldText(text);
+    if (!hay) return;
+
+    const PL = getPassageLinks();
+    const citeMatches = PL?.findAllCiteMatches ? PL.findAllCiteMatches(hay) : [];
+    if (
+      citeMatches.length < 2 ||
+      findAllMethodLinkMatches(hay).length > 0 ||
+      !citeGapsAllowReorder(hay, citeMatches)
+    ) {
+      appendRichDocContentCore(parent, text, ctx);
+      return;
+    }
+
+    const first = citeMatches[0];
+    const last = citeMatches[citeMatches.length - 1];
+    const prefix = hay.slice(0, first.index);
+    if (prefix.trim() && !isListMarkupDebris(prefix)) {
+      appendRichDocContentCore(parent, prefix, ctx);
+    }
+
+    const entries = citeMatches.map((match) => ({
+      match,
+      part: citePartFromMatch(match, ctx.citeStore, ctx.vocab),
+    }));
+    entries.forEach((e) => {
+      e.year = citeYearForSort(e.part, ctx);
+    });
+    entries.sort((a, b) => {
+      const hasA = a.year > 0;
+      const hasB = b.year > 0;
+      if (!hasA && !hasB) return a.match.index - b.match.index;
+      if (!hasA) return 1;
+      if (!hasB) return -1;
+      if (a.year !== b.year) return b.year - a.year;
+      return a.match.index - b.match.index;
+    });
+
+    entries.forEach((entry, i) => {
+      if (i > 0) parent.appendChild(document.createTextNode(", "));
+      if (entry.part?.type === "cite") appendCiteButton(parent, entry.part, ctx);
+    });
+
+    const tail = hay.slice(last.lastIndex);
+    if (tail.trim() && !isListMarkupDebris(tail)) {
+      appendRichDocContentCore(parent, tail, ctx);
+    }
+  }
+
+  function appendListBlockWithEmbeds(parent, raw, ordered, ctx) {
+    const IF = getInlineFormat();
+    const inner = IF?.extractListInner
+      ? IF.extractListInner(raw)
+      : raw;
+    const items = IF?.parseListInner
+      ? IF.parseListInner(inner, ordered)
+      : [];
+    if (!items.length) return;
+
+    const list = document.createElement(ordered ? "ol" : "ul");
+    list.className = "litlens-fmt-list";
+    for (const item of items) {
+      const li = document.createElement("li");
+      appendContentWithSortedCites(li, item, ctx);
+      list.appendChild(li);
+    }
+    parent.appendChild(list);
+  }
+
+  /**
+   * Lists + [[cite:…]] + [[method:…]] + inline tags in one pass (cites stay inside <li>).
+   */
+  function appendRichDocContentCore(parent, text, ctx) {
+    const hay = normalizeDocFieldText(text);
+    if (!hay) return;
+
+    const PL = getPassageLinks();
+    const { citeStore, vocab } = ctx;
+    const listRanges = findListRanges(hay);
+    const spans = [];
+
+    for (const range of listRanges) {
+      spans.push({
+        type: "list",
+        index: range.start,
+        lastIndex: range.end,
+        raw: range.raw,
+        ordered: range.ordered,
+      });
+    }
+
+    const citeMatches = PL?.findAllCiteMatches
+      ? PL.findAllCiteMatches(hay)
+      : [];
+    for (const match of citeMatches) {
+      if (isInsideRanges(match.index, listRanges)) continue;
+      spans.push({
+        type: "embed",
+        index: match.index,
+        lastIndex: match.lastIndex,
+        part: citePartFromMatch(match, citeStore, vocab),
+      });
+    }
+
+    for (const match of findAllMethodLinkMatches(hay)) {
+      if (isInsideRanges(match.index, listRanges)) continue;
+      spans.push({
+        type: "embed",
+        index: match.index,
+        lastIndex: match.lastIndex,
+        part: citePartFromMatch(
+          { ...match, kind: "method" },
+          citeStore,
+          vocab
+        ),
+      });
+    }
+
+    spans.sort((a, b) => a.index - b.index);
+
+    if (!spans.length) {
+      appendTextWithBreaks(parent, hay, { inlineOnly: true });
+      return;
+    }
+
+    let last = 0;
+    for (const span of spans) {
+      if (span.index < last) continue;
+      if (span.index > last) {
+        const chunk = hay.slice(last, span.index);
+        if (!isListMarkupDebris(chunk)) {
+          appendContentWithSortedCites(parent, chunk, ctx);
+        }
+      }
+      if (span.type === "list") {
+        appendListBlockWithEmbeds(parent, span.raw, span.ordered, ctx);
+      } else if (span.part?.type === "method") {
+        appendMethodButton(parent, span.part, ctx);
+      } else if (span.part?.type === "cite") {
+        appendCiteButton(parent, span.part, ctx);
+      }
+      last = span.lastIndex;
+    }
+    if (last < hay.length) {
+      const tail = hay.slice(last);
+      if (!isListMarkupDebris(tail)) {
+        appendContentWithSortedCites(parent, tail, ctx);
+      }
+    }
+  }
+
+  function appendRichDocContent(parent, text, ctx) {
+    const hay = normalizeDocFieldText(text);
+    if (!hay) return;
+    const PL = getPassageLinks();
+    const listRanges = findListRanges(hay);
+    const citeMatches = PL?.findAllCiteMatches ? PL.findAllCiteMatches(hay) : [];
+    if (
+      citeMatches.length >= 2 &&
+      !listRanges.length &&
+      !findAllMethodLinkMatches(hay).length &&
+      citeGapsAllowReorder(hay, citeMatches)
+    ) {
+      appendContentWithSortedCites(parent, text, ctx);
+      return;
+    }
+    appendRichDocContentCore(parent, text, ctx);
+  }
+
+  function renderMethodDocFragment(text, options = {}) {
+    const frag = document.createDocumentFragment();
+    if (!text) return frag;
+    appendRichDocContent(frag, text, options);
     return frag;
   }
 
@@ -862,6 +1213,8 @@
     methodLinkToken,
     parseMethodLinkToken,
     hasMethodLinkMarkup,
+    normalizeDocFieldText,
+    stripDuplicateListSuffix,
     renderMethodDocFragment,
     findInCatalog,
     resolveTarget,
